@@ -60,6 +60,7 @@ public
   import Sections = NFSections;
   import SimplifyExp = NFSimplifyExp;
   import Statement = NFStatement;
+  import Subscript = NFSubscript;
   import Type = NFType;
   import NFPrefixes.Variability;
   import Variable = NFVariable;
@@ -70,6 +71,7 @@ public
   import BVariable = NBVariable;
   import Replacements = NBReplacements;
   import StrongComponent = NBStrongComponent;
+  import Tearing = NBTearing;
 
   // Util imports
   import Array;
@@ -87,7 +89,7 @@ public
     record DIFFERENTIATION_ARGUMENTS
       ComponentRef diffCref                                       "The input will be differentiated w.r.t. this cref (only SIMPLE).";
       list<Pointer<Variable>> new_vars                            "contains all new variables that need to be added to the system";
-      Option<UnorderedMap<ComponentRef,ComponentRef>> jacobianHT  "seed and temporary cref hashtable x --> $SEED.MATRIX.x, y --> $pDer.MATRIX.y";
+      Option<UnorderedMap<ComponentRef,ComponentRef>> diff_map    "seed and temporary cref map x --> $SEED.MATRIX.x, y --> $pDer.MATRIX.y. Can be used for any differentiation rules";
       DifferentiationType diffType                                "Differentiation use case (time, simple, function, jacobian)";
       FunctionTree funcTree                                       "Function tree containing all functions and their known derivatives";
       Boolean scalarized                                          "true if the variables are scalarized";
@@ -97,12 +99,12 @@ public
       input DifferentiationType ty = DifferentiationType.TIME;
       input FunctionTree funcTree = FunctionTreeImpl.EMPTY();
       output DifferentiationArguments diffArgs = DIFFERENTIATION_ARGUMENTS(
-        diffCref        = ComponentRef.EMPTY(),
-        new_vars        = {},
-        jacobianHT      = NONE(),
-        diffType        = ty,
-        funcTree        = funcTree,
-        scalarized      = false
+        diffCref    = ComponentRef.EMPTY(),
+        new_vars    = {},
+        diff_map    = NONE(),
+        diffType    = ty,
+        funcTree    = funcTree,
+        scalarized  = false
       );
     end default;
 
@@ -110,12 +112,12 @@ public
       input ComponentRef cref;
       input FunctionTree funcTree = FunctionTreeImpl.EMPTY();
       output DifferentiationArguments diffArgs = DIFFERENTIATION_ARGUMENTS(
-        diffCref        = cref,
-        new_vars        = {},
-        jacobianHT      = NONE(),
-        diffType        = DifferentiationType.SIMPLE,
-        funcTree        = funcTree,
-        scalarized      = false
+        diffCref    = cref,
+        new_vars    = {},
+        diff_map    = NONE(),
+        diffType    = DifferentiationType.SIMPLE,
+        funcTree    = funcTree,
+        scalarized  = false
       );
     end simpleCref;
 
@@ -178,6 +180,8 @@ public
         Slice<VariablePointer> new_var_slice;
         Slice<EquationPointer> new_eqn_slice;
         DifferentiationArguments diffArguments;
+        Tearing strict;
+        Option<Tearing> casual;
 
       case StrongComponent.SINGLE_COMPONENT() algorithm
         new_var := differentiateVariablePointer(comp.var, diffArguments_ptr);
@@ -214,12 +218,13 @@ public
         Equation.createName(new_eqn, idx, context);
       then StrongComponent.GENERIC_COMPONENT(new_cref, Slice.SLICE(new_eqn, comp.eqn.indices));
 
+      case StrongComponent.ALGEBRAIC_LOOP() algorithm
+        strict := differentiateTearing(comp.strict, diffArguments_ptr, idx, context, name);
+        casual := Util.applyOption(comp.casual, function differentiateTearing(diffArguments_ptr=diffArguments_ptr, idx=idx, context=context, name=name));
+      then StrongComponent.ALGEBRAIC_LOOP(-1, strict, casual, comp.linear, false, comp.homotopy, comp.status);
+
       case StrongComponent.ENTWINED_COMPONENT() algorithm
         Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " not implemented for entwined equation:\n" + StrongComponent.toString(comp)});
-      then fail();
-
-      case StrongComponent.ALGEBRAIC_LOOP() algorithm
-        Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " not implemented for algebraic loop:\n" + StrongComponent.toString(comp)});
       then fail();
 
       case StrongComponent.ALIAS() then differentiateStrongComponent(comp.original, diffArguments_ptr, idx, context, name);
@@ -229,6 +234,27 @@ public
       then fail();
     end match;
   end differentiateStrongComponent;
+
+  function differentiateTearing
+    input Tearing tearing;
+    input Pointer<DifferentiationArguments> diffArguments_ptr;
+    input Pointer<Integer> idx;
+    input String context;
+    input String name;
+    output Tearing diff_tearing;
+  protected
+    list<Slice<VariablePointer>> ite_vars;
+    list<Slice<EquationPointer>> res_eqns;
+    array<StrongComponent> inner_eqns;
+  algorithm
+    ite_vars := list(Slice.apply(var, function differentiateVariablePointer(diffArguments_ptr = diffArguments_ptr)) for var in tearing.iteration_vars);
+    res_eqns := list(Slice.apply(eqn, function differentiateEquationPointer(diffArguments_ptr = diffArguments_ptr, name = name)) for eqn in tearing.residual_eqns);
+    // filter discretes?
+    inner_eqns := listArray(list(differentiateStrongComponent(ie, diffArguments_ptr, idx, context, name) for ie in tearing.innerEquations));
+
+    // diff jac?
+    diff_tearing := Tearing.TEARING_SET(ite_vars, res_eqns, inner_eqns, NONE());
+  end differentiateTearing;
 
   function differentiateEquationPointerList
     "author: kabdelhak
@@ -596,10 +622,10 @@ public
       then fail();
     end match;
 
-    (exp, diffArguments) := match (exp, diffArguments.diffType, diffArguments.jacobianHT)
+    (exp, diffArguments) := match (exp, diffArguments.diffType, diffArguments.diff_map)
       local
         Expression res;
-        UnorderedMap<ComponentRef,ComponentRef> jacobianHT;
+        UnorderedMap<ComponentRef,ComponentRef> diff_map;
 
       // -------------------------------------
       //    EMPTY and WILD crefs do nothing
@@ -614,11 +640,11 @@ public
 
       // Types: (FUNCTION)
       // Any variable that is in the HT will be differentiated accordingly. 0 otherwise
-      case (Expression.CREF(), DifferentiationType.FUNCTION, SOME(jacobianHT)) algorithm
+      case (Expression.CREF(), DifferentiationType.FUNCTION, SOME(diff_map)) algorithm
         strippedCref := ComponentRef.stripSubscriptsAll(exp.cref);
-        if UnorderedMap.contains(strippedCref, jacobianHT) then
+        if UnorderedMap.contains(strippedCref, diff_map) then
           // get the derivative and reapply subscripts
-          derCref := UnorderedMap.getOrFail(strippedCref, jacobianHT);
+          derCref := UnorderedMap.getOrFail(strippedCref, diff_map);
           derCref := ComponentRef.mergeSubscripts(ComponentRef.subscriptsAllFlat(exp.cref), derCref);
           res     := Expression.fromCref(derCref);
         else
@@ -679,6 +705,16 @@ public
       then (Expression.makeZero(exp.ty), diffArguments);
 
       // Types: (TIME)
+      // known derivatives by state order
+      case (Expression.CREF(), DifferentiationType.TIME, SOME(diff_map))
+        guard(UnorderedMap.contains(ComponentRef.stripSubscriptsAll(exp.cref), diff_map)) algorithm
+          // get the derivative and reapply subscripts
+        derCref := UnorderedMap.getOrFail(ComponentRef.stripSubscriptsAll(exp.cref), diff_map);
+        derCref := ComponentRef.mergeSubscripts(ComponentRef.subscriptsAllFlat(exp.cref), derCref);
+        res     := Expression.fromCref(derCref);
+      then (res, diffArguments);
+
+      // Types: (TIME)
       // DUMMY_STATES => DUMMY_DER
       case (Expression.CREF(), DifferentiationType.TIME, _)
         guard(BVariable.isDummyState(var_ptr))
@@ -711,27 +747,27 @@ public
       // -------------------------------------
 
       // Types: (JACOBIAN)
-      // cref in jacobianHT => get $SEED or $pDER variable from hash table
-      case (Expression.CREF(), DifferentiationType.JACOBIAN, SOME(jacobianHT))
+      // cref in diff_map => get $SEED or $pDER variable from hash table
+      case (Expression.CREF(), DifferentiationType.JACOBIAN, SOME(diff_map))
         guard(diffArguments.scalarized)
       algorithm
-        if UnorderedMap.contains(exp.cref, jacobianHT) then
-          res := Expression.fromCref(UnorderedMap.getOrFail(exp.cref, jacobianHT));
+        if UnorderedMap.contains(exp.cref, diff_map) then
+          res := Expression.fromCref(UnorderedMap.getOrFail(exp.cref, diff_map));
         else
-          // Everything that is not in jacobianHT gets differentiated to zero
+          // Everything that is not in diff_map gets differentiated to zero
           res := Expression.makeZero(exp.ty);
         end if;
       then (res, diffArguments);
 
       // Types: (JACOBIAN)
-      // cref in jacobianHT => get $SEED or $pDER variable from hash table
-      case (Expression.CREF(), DifferentiationType.JACOBIAN, SOME(jacobianHT))
+      // cref in diff_map => get $SEED or $pDER variable from hash table
+      case (Expression.CREF(), DifferentiationType.JACOBIAN, SOME(diff_map))
         guard(not diffArguments.scalarized)
       algorithm
         strippedCref := ComponentRef.stripSubscriptsAll(exp.cref);
-        if UnorderedMap.contains(strippedCref, jacobianHT) then
+        if UnorderedMap.contains(strippedCref, diff_map) then
           // get the derivative an reapply subscripts
-          derCref := UnorderedMap.getOrFail(strippedCref, jacobianHT);
+          derCref := UnorderedMap.getOrFail(strippedCref, diff_map);
           derCref := ComponentRef.mergeSubscripts(ComponentRef.subscriptsAllFlat(exp.cref), derCref);
           res     := Expression.fromCref(derCref);
         else
@@ -788,7 +824,7 @@ public
 
     (exp, diffArguments) := match exp
       local
-        Expression ret;
+        Expression ret, arg;
         Call call, der_call;
         Option<Function> func_opt, der_func_opt;
         list<Function> derivatives;
@@ -796,7 +832,6 @@ public
         list<Expression> arguments = {};
         Operator addOp, mulOp;
         list<tuple<Expression, InstNode>> arguments_inputs;
-        Expression arg;
         InstNode inp;
         Boolean isCont, isReal;
         // interface map. If the map contains a variable it has a zero derivative
@@ -804,7 +839,14 @@ public
         // (it is possible that a variable has a zero derivative, but still appears in the interface)
         UnorderedMap<String, Boolean> interface_map = UnorderedMap.new<Boolean>(stringHashDjb2, stringEqual);
 
-      // for reductions only differentiate the argument
+      // for array constructors only differentiate the argument
+      case ret as Expression.CALL(call = call as Call.TYPED_ARRAY_CONSTRUCTOR()) algorithm
+        (arg, diffArguments) := differentiateExpression(call.exp, diffArguments);
+        call.exp := arg;
+        ret.call := call;
+      then (ret, diffArguments);
+
+      // handle reductions
       case Expression.CALL(call = call as Call.TYPED_REDUCTION()) algorithm
         (ret, diffArguments) := differentiateReduction(AbsynUtil.pathString(Function.nameConsiderBuiltin(call.fn)), exp, diffArguments);
       then (ret, diffArguments);
@@ -1045,35 +1087,50 @@ public
         end if;
       then ret;
 
+      // d/dz min(X) = (dX/dz)[argmin(X)]
+      // d/dz max(X) = (dX/dz)[argmax(X)]
       // d/dz min(x,y) = if x < y then dx/dz else dy/dz
       // d/dz max(x,y) = if x > y then dx/dz else dy/dz
-      // FIXME at x = y the derivative may not be well-defined
       case (Expression.CALL()) guard(name == "min" or name == "max")
       algorithm
-        (arg1, arg2) := match Call.arguments(exp.call)
-          case {arg1, arg2} then (arg1, arg2);
+        ret := match Call.arguments(exp.call)
+          case {arg1} algorithm
+            // dx/dz
+            (diffArg1, diffArguments) := differentiateExpression(arg1, diffArguments);
+            ty := Expression.typeOf(diffArg1);
+            if Expression.isZero(diffArg1) then
+              // make 0 of reduced type
+              ret := Expression.makeZero(Type.arrayElementType(ty));
+            else
+              ret1 := Expression.CALL(Call.makeTypedCall(
+                fn          = if name == "min" then NFBuiltinFuncs.ARG_MIN_ARR_REAL else NFBuiltinFuncs.ARG_MAX_ARR_REAL,
+                args        = {arg1},
+                variability = Expression.variability(arg1),
+                purity      = NFPrefixes.Purity.PURE));
+              ret := Expression.applySubscripts({Subscript.INDEX(ret1)}, diffArg1);
+            end if;
+          then ret;
+
+          case {arg1, arg2} algorithm
+            // dx/dz, dy/dz
+            (diffArg1, diffArguments) := differentiateExpression(arg1, diffArguments);
+            (diffArg2, diffArguments) := differentiateExpression(arg2, diffArguments);
+
+            ty := Expression.typeOf(diffArg1);
+            if Expression.isZero(diffArg1) and Expression.isZero(diffArg2) then
+              ret := Expression.makeZero(ty);
+            else
+              // condition x < y or x > y
+              ret1 := Expression.RELATION(arg1, if name == "min" then Operator.makeLess(ty) else Operator.makeGreater(ty), arg2, -1);
+              // if condition then dx/dz else dy/dz
+              ret := Expression.IF(ty, ret1, diffArg1, diffArg2);
+            end if;
+          then ret;
           else algorithm
             Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for: " + Expression.toString(exp) + "."});
           then fail();
         end match;
 
-        // dx/dz, dy/dz
-        (diffArg1, diffArguments) := differentiateExpression(arg1, diffArguments);
-        (diffArg2, diffArguments) := differentiateExpression(arg2, diffArguments);
-
-        ty := Expression.typeOf(diffArg1);
-        if Expression.isZero(diffArg1) and Expression.isZero(diffArg2) then
-          ret := Expression.makeZero(ty);
-        else
-          // condition x < y or x > y
-          ret1 := Expression.RELATION(
-            arg1,
-            if name == "min" then Operator.makeLess(ty) else Operator.makeGreater(ty),
-            arg2,
-            -1);
-          // if condition then dx/dz else dy/dz
-          ret := Expression.IF(ty, ret1, diffArg1, diffArg2);
-        end if;
       then ret;
 
       // Builtin function call with one argument
@@ -1388,13 +1445,13 @@ public
             local_outputs     := list(InstNode.protect(node) for node in local_outputs);
 
             // prepare differentiation arguments
-            funcDiffArgs              := DifferentiationArguments.default();
-            funcDiffArgs.diffType     := DifferentiationType.FUNCTION;
-            funcDiffArgs.funcTree     := diffArguments.funcTree;
+            funcDiffArgs          := DifferentiationArguments.default();
+            funcDiffArgs.diffType := DifferentiationType.FUNCTION;
+            funcDiffArgs.funcTree := diffArguments.funcTree;
             createInterfaceDerivatives(der_func.inputs, interface_map, diff_map);
             createInterfaceDerivatives(der_func.locals, interface_map, diff_map);
             createInterfaceDerivatives(der_func.outputs, interface_map, diff_map);
-            funcDiffArgs.jacobianHT   := SOME(diff_map);
+            funcDiffArgs.diff_map := SOME(diff_map);
 
             // differentiate interface arguments
             der_func.inputs   := differentiateFunctionInterfaceNodes(der_func.inputs, interface_map, diff_map, funcDiffArgs, true);
@@ -1516,14 +1573,29 @@ public
     input UnorderedMap<String, Boolean> interface_map;
     input UnorderedMap<ComponentRef, ComponentRef> diff_map;
   protected
-    ComponentRef cref, diff_cref;
     list<InstNode> n;
+    ComponentRef cref;
+
+    function addCref
+      input ComponentRef cref;
+      input UnorderedMap<ComponentRef, ComponentRef> diff_map;
+    protected
+      ComponentRef diff_cref;
+      list<ComponentRef> children;
+    algorithm
+      diff_cref := BVariable.makeFDerVar(cref);
+      UnorderedMap.add(cref, diff_cref, diff_map);
+
+      children := ComponentRef.getRecordChildren(cref);
+      for child in children loop
+        addCref(child, diff_map);
+      end for;
+    end addCref;
   algorithm
     n := list(node for node guard(not UnorderedMap.contains(InstNode.name(node), interface_map)) in interface_nodes);
     for node in n loop
       cref := ComponentRef.fromNode(node, InstNode.getType(node));
-      diff_cref := BVariable.makeFDerVar(cref);
-      UnorderedMap.add(cref, diff_cref, diff_map);
+      addCref(cref, diff_map);
     end for;
   end createInterfaceDerivatives;
 
@@ -1571,7 +1643,7 @@ public
                   createInterfaceDerivatives({var}, interface_map, diff_map);
                   createInterfaceDerivatives(der_func.locals, interface_map, diff_map);
                   createInterfaceDerivatives(der_func.outputs, interface_map, diff_map);
-                  diffArgs.jacobianHT   := SOME(diff_map);
+                  diffArgs.diff_map   := SOME(diff_map);
 
                   der_func.locals   := differentiateFunctionInterfaceNodes(der_func.locals, interface_map, diff_map, diffArgs, true);
                   der_func.outputs  := differentiateFunctionInterfaceNodes(der_func.outputs, interface_map, diff_map, diffArgs, false);
@@ -1949,7 +2021,7 @@ public
 
   function differentiateEquationAttributes
     "Differentiates the residual variable for diffType JACOBIAN, if it exists.
-    The cref has to be saved in the jacobianHT for this to work.
+    The cref has to be saved in the diff_map for this to work.
     ToDo: needs to be adapted for torn/inner equations"
     input output EquationAttributes attr;
     input DifferentiationArguments diffArguments;
@@ -1957,13 +2029,13 @@ public
     attr := match (attr, diffArguments)
       local
         Pointer<Variable> residualVar, diffedResidualVar;
-        UnorderedMap<ComponentRef,ComponentRef> jacobianHT;
+        UnorderedMap<ComponentRef,ComponentRef> diff_map;
 
       case (EquationAttributes.EQUATION_ATTRIBUTES(residualVar = SOME(residualVar)),
-         DIFFERENTIATION_ARGUMENTS(jacobianHT = SOME(jacobianHT), diffType = DifferentiationType.JACOBIAN))
-        guard(UnorderedMap.contains(BVariable.getVarName(residualVar), jacobianHT))
+         DIFFERENTIATION_ARGUMENTS(diff_map = SOME(diff_map), diffType = DifferentiationType.JACOBIAN))
+        guard(UnorderedMap.contains(BVariable.getVarName(residualVar), diff_map))
         algorithm
-          diffedResidualVar := BVariable.getVarPointer(UnorderedMap.getOrFail(BVariable.getVarName(residualVar), jacobianHT));
+          diffedResidualVar := BVariable.getVarPointer(UnorderedMap.getOrFail(BVariable.getVarName(residualVar), diff_map));
           attr.residualVar := SOME(diffedResidualVar);
       then attr;
 

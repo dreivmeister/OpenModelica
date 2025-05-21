@@ -257,7 +257,7 @@ const char *FLAG_DESC[FLAG_MAX+1] = {
   /* FLAG_NOEQUIDISTANT_OUT_FREQ*/        "value controls the output frequency in noEquidistantTimeGrid mode",
   /* FLAG_NOEQUIDISTANT_OUT_TIME*/        "value controls the output time point in noEquidistantOutputTime mode",
   /* FLAG_NOEVENTEMIT */                  "do not emit event points to the result file",
-  /* FLAG_NO_RESTART */                   "disables the restart of the integration method after an event is performed, used by the methods: dassl, ida",
+  /* FLAG_NO_RESTART */                   "disables the restart of the integration method after an event is performed, used by the methods: dassl, ida, gbode",
   /* FLAG_NO_ROOTFINDING */               "disables the internal root finding procedure of methods: dassl and ida.",
   /* FLAG_NO_SCALING */                   "disables scaling for the variables and the residuals in the algebraic nonlinear solver KINSOL.",
   /* FLAG_NO_SUPPRESS_ALG */              "flag to not suppress algebraic variables in the local error test of ida solver in daeMode",
@@ -1206,7 +1206,7 @@ const char *NEWTONSTRATEGY_DESC[NEWTON_MAX] = {
 };
 
 
-const char *JACOBIAN_METHOD[JAC_MAX] = {
+const char *JACOBIAN_METHOD_NAME[JAC_MAX] = {
   "unknown",
 
   "coloredNumerical",
@@ -1226,7 +1226,7 @@ const char *JACOBIAN_METHOD_DESC[JAC_MAX] = {
   "Dense symbolical Jacobian. Needs omc compiler flag --generateDynamicJacobian=symbolic.",
  };
 
-const char *IDA_LS_METHOD[IDA_LS_MAX] = {
+const char *IDA_LS_METHOD_NAME[IDA_LS_MAX] = {
   "unknown",
 
   "dense",
@@ -1246,7 +1246,7 @@ const char *IDA_LS_METHOD_DESC[IDA_LS_MAX] = {
   "ida TFQMR. Iterative method"
 };
 
-const char *NLS_LS_METHOD[NLS_LS_MAX] = {
+const char *NLS_LS_METHOD_NAME[NLS_LS_MAX] = {
   "unknown",
 
   "default",
@@ -1264,7 +1264,7 @@ const char *NLS_LS_METHOD_DESC[NLS_LS_MAX] = {
   "use KLU direct sparse solver. Only with KINSOL available."
 };
 
-const char *IMPRK_LS_METHOD[IMPRK_LS_MAX] = {
+const char *IMPRK_LS_METHOD_NAME[IMPRK_LS_MAX] = {
   "unknown",
 
   "iterative",

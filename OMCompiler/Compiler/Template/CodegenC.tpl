@@ -167,24 +167,27 @@ end translateModel;
     extern const char* <%symbolName(modelNamePrefixStr,"zeroCrossingDescription")%>(int i, int **out_EquationIndexes);
     extern const char* <%symbolName(modelNamePrefixStr,"relationDescription")%>(int i);
     extern void <%symbolName(modelNamePrefixStr,"function_initSample")%>(DATA *data, threadData_t *threadData);
-    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianG")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian);
-    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianA")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian);
-    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianB")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian);
-    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianC")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian);
-    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianD")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian);
-    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianF")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian);
-    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianH")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian);
-    extern int <%symbolName(modelNamePrefixStr,"functionJacG_column")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *thisJacobian, ANALYTIC_JACOBIAN *parentJacobian);
-    extern int <%symbolName(modelNamePrefixStr,"functionJacA_column")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *thisJacobian, ANALYTIC_JACOBIAN *parentJacobian);
-    extern int <%symbolName(modelNamePrefixStr,"functionJacB_column")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *thisJacobian, ANALYTIC_JACOBIAN *parentJacobian);
-    extern int <%symbolName(modelNamePrefixStr,"functionJacC_column")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *thisJacobian, ANALYTIC_JACOBIAN *parentJacobian);
-    extern int <%symbolName(modelNamePrefixStr,"functionJacD_column")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *thisJacobian, ANALYTIC_JACOBIAN *parentJacobian);
-    extern int <%symbolName(modelNamePrefixStr,"functionJacF_column")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *thisJacobian, ANALYTIC_JACOBIAN *parentJacobian);
-    extern int <%symbolName(modelNamePrefixStr,"functionJacH_column")%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *thisJacobian, ANALYTIC_JACOBIAN *parentJacobian);
+    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianG")%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
+    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianA")%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
+    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianB")%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
+    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianC")%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
+    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianD")%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
+    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianF")%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
+    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianH")%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
+    extern int <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianS")%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
+    extern int <%symbolName(modelNamePrefixStr,"functionJacG_column")%>(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
+    extern int <%symbolName(modelNamePrefixStr,"functionJacA_column")%>(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
+    extern int <%symbolName(modelNamePrefixStr,"functionJacB_column")%>(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
+    extern int <%symbolName(modelNamePrefixStr,"functionJacC_column")%>(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
+    extern int <%symbolName(modelNamePrefixStr,"functionJacD_column")%>(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
+    extern int <%symbolName(modelNamePrefixStr,"functionJacF_column")%>(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
+    extern int <%symbolName(modelNamePrefixStr,"functionJacH_column")%>(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
+    extern int <%symbolName(modelNamePrefixStr,"functionJacS_column")%>(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
     extern const char* <%symbolName(modelNamePrefixStr,"linear_model_frame")%>(void);
     extern const char* <%symbolName(modelNamePrefixStr,"linear_model_datarecovery_frame")%>(void);
     extern int <%symbolName(modelNamePrefixStr,"mayer")%>(DATA* data, modelica_real** res, short *);
     extern int <%symbolName(modelNamePrefixStr,"lagrange")%>(DATA* data, modelica_real** res, short *, short *);
+    extern int <%symbolName(modelNamePrefixStr,"getInputVarIndicesInOptimization")%>(DATA* data, int* input_var_indices);
     extern int <%symbolName(modelNamePrefixStr,"pickUpBoundsForInputsInOptimization")%>(DATA* data, modelica_real* min, modelica_real* max, modelica_real*nominal, modelica_boolean *useNominal, char ** name, modelica_real * start, modelica_real * startTimeOpt);
     extern int <%symbolName(modelNamePrefixStr,"setInputData")%>(DATA *data, const modelica_boolean file);
     extern int <%symbolName(modelNamePrefixStr,"getTimeGrid")%>(DATA *data, modelica_integer * nsi, modelica_real**t);
@@ -980,6 +983,7 @@ template simulationFile_opt_header(SimCode simCode)
     #endif
       int <%symbolName(modelNamePrefixStr,"mayer")%>(DATA* data, modelica_real** res, short*);
       int <%symbolName(modelNamePrefixStr,"lagrange")%>(DATA* data, modelica_real** res, short *, short *);
+      int <%symbolName(modelNamePrefixStr,"getInputVarIndicesInOptimization")%>(DATA* data, int* input_var_indices);
       int <%symbolName(modelNamePrefixStr,"pickUpBoundsForInputsInOptimization")%>(DATA* data, modelica_real* min, modelica_real* max, modelica_real*nominal, modelica_boolean *useNominal, char ** name, modelica_real * start, modelica_real * startTimeOpt);
       int <%symbolName(modelNamePrefixStr,"setInputData")%>(DATA *data, const modelica_boolean file);
       int <%symbolName(modelNamePrefixStr,"getTimeGrid")%>(DATA *data, modelica_integer * nsi, modelica_real**t);
@@ -1298,87 +1302,91 @@ template simulationFile(SimCode simCode, String guid, String isModelExchangeFMU)
     #include "<%simCode.fileNamePrefix%>_13opt.h"
 
     struct OpenModelicaGeneratedFunctionCallbacks <%symbolName(modelNamePrefixStr,"callback")%> = {
-       <% if isModelExchangeFMU then "NULL" else '(int (*)(DATA *, threadData_t *, void *)) <%symbolName(modelNamePrefixStr,"performSimulation")%>'%>,    /* performSimulation */
-       <% if isModelExchangeFMU then "NULL" else '(int (*)(DATA *, threadData_t *, void *)) <%symbolName(modelNamePrefixStr,"performQSSSimulation")%>'%>,    /* performQSSSimulation */
-       <% if isModelExchangeFMU then "NULL" else '<%symbolName(modelNamePrefixStr,"updateContinuousSystem")%>'%>,    /* updateContinuousSystem */
-       <%symbolName(modelNamePrefixStr,"callExternalObjectDestructors")%>,    /* callExternalObjectDestructors */
-       <%if intEq(varInfo.numNonLinearSystems,0) then "NULL" else symbolName(modelNamePrefixStr,"initialNonLinearSystem")%>,    /* initialNonLinearSystem */
-       <%if intEq(varInfo.numLinearSystems,0) then "NULL" else symbolName(modelNamePrefixStr,"initialLinearSystem")%>,    /* initialLinearSystem */
-       <%if intEq(varInfo.numMixedSystems,0) then "NULL" else symbolName(modelNamePrefixStr,"initialMixedSystem")%>,    /* initialMixedSystem */
-       #if !defined(OMC_NO_STATESELECTION)
-       <%symbolName(modelNamePrefixStr,"initializeStateSets")%>,
-       #else
-       NULL,
-       #endif    /* initializeStateSets */
-       <%symbolName(modelNamePrefixStr,"initializeDAEmodeData")%>,
-       <%symbolName(modelNamePrefixStr,"computeVarIndices")%>,
-       <%symbolName(modelNamePrefixStr,"functionODE")%>,
-       <%symbolName(modelNamePrefixStr,"functionAlgebraics")%>,
-       <%symbolName(modelNamePrefixStr,"functionDAE")%>,
-       <%symbolName(modelNamePrefixStr,"functionLocalKnownVars")%>,
-       <%symbolName(modelNamePrefixStr,"input_function")%>,
-       <%symbolName(modelNamePrefixStr,"input_function_init")%>,
-       <%symbolName(modelNamePrefixStr,"input_function_updateStartValues")%>,
-       <%symbolName(modelNamePrefixStr,"data_function")%>,
-       <%symbolName(modelNamePrefixStr,"output_function")%>,
-       <%symbolName(modelNamePrefixStr,"setc_function")%>,
-       <%symbolName(modelNamePrefixStr,"setb_function")%>,
-       <%symbolName(modelNamePrefixStr,"function_storeDelayed")%>,
-       <%symbolName(modelNamePrefixStr,"function_storeSpatialDistribution")%>,
-       <%symbolName(modelNamePrefixStr,"function_initSpatialDistribution")%>,
-       <%symbolName(modelNamePrefixStr,"updateBoundVariableAttributes")%>,
-       <%symbolName(modelNamePrefixStr,"functionInitialEquations")%>,
-       <%if Config.adaptiveHomotopy() then (if Config.globalHomotopy() then '2' else '3') else (if Config.globalHomotopy() then '1' else '0')%>, /* useHomotopy - 0: local homotopy (equidistant lambda), 1: global homotopy (equidistant lambda), 2: new global homotopy approach (adaptive lambda), 3: new local homotopy approach (adaptive lambda)*/
-       <%if intEq(listLength(initialEquations_lambda0), 0) then "NULL" else '<%symbolName(modelNamePrefixStr,"functionInitialEquations_lambda0")%>'%>,
-       <%symbolName(modelNamePrefixStr,"functionRemovedInitialEquations")%>,
-       <%symbolName(modelNamePrefixStr,"updateBoundParameters")%>,
-       <%symbolName(modelNamePrefixStr,"checkForAsserts")%>,
-       <%symbolName(modelNamePrefixStr,"function_ZeroCrossingsEquations")%>,
-       <%symbolName(modelNamePrefixStr,"function_ZeroCrossings")%>,
-       <%symbolName(modelNamePrefixStr,"function_updateRelations")%>,
-       <%symbolName(modelNamePrefixStr,"zeroCrossingDescription")%>,
-       <%symbolName(modelNamePrefixStr,"relationDescription")%>,
-       <%symbolName(modelNamePrefixStr,"function_initSample")%>,
-       <%symbolName(modelNamePrefixStr,"INDEX_JAC_A")%>,
-       <%symbolName(modelNamePrefixStr,"INDEX_JAC_B")%>,
-       <%symbolName(modelNamePrefixStr,"INDEX_JAC_C")%>,
-       <%symbolName(modelNamePrefixStr,"INDEX_JAC_D")%>,
-       <%symbolName(modelNamePrefixStr,"INDEX_JAC_F")%>,
-       <%symbolName(modelNamePrefixStr,"INDEX_JAC_H")%>,
-       <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianA")%>,
-       <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianB")%>,
-       <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianC")%>,
-       <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianD")%>,
-       <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianF")%>,
-       <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianH")%>,
-       <%symbolName(modelNamePrefixStr,"functionJacA_column")%>,
-       <%symbolName(modelNamePrefixStr,"functionJacB_column")%>,
-       <%symbolName(modelNamePrefixStr,"functionJacC_column")%>,
-       <%symbolName(modelNamePrefixStr,"functionJacD_column")%>,
-       <%symbolName(modelNamePrefixStr,"functionJacF_column")%>,
-       <%symbolName(modelNamePrefixStr,"functionJacH_column")%>,
-       <%symbolName(modelNamePrefixStr,"linear_model_frame")%>,
-       <%symbolName(modelNamePrefixStr,"linear_model_datarecovery_frame")%>,
-       <%symbolName(modelNamePrefixStr,"mayer")%>,
-       <%symbolName(modelNamePrefixStr,"lagrange")%>,
-       <%symbolName(modelNamePrefixStr,"pickUpBoundsForInputsInOptimization")%>,
-       <%symbolName(modelNamePrefixStr,"setInputData")%>,
-       <%symbolName(modelNamePrefixStr,"getTimeGrid")%>,
-       <%symbolName(modelNamePrefixStr,"symbolicInlineSystem")%>,
-       <%symbolName(modelNamePrefixStr,"function_initSynchronous")%>,
-       <%symbolName(modelNamePrefixStr,"function_updateSynchronous")%>,
-       <%symbolName(modelNamePrefixStr,"function_equationsSynchronous")%>,
-       <%symbolName(modelNamePrefixStr,"inputNames")%>,
-       <%symbolName(modelNamePrefixStr,"dataReconciliationInputNames")%>,
-       <%symbolName(modelNamePrefixStr,"dataReconciliationUnmeasuredVariables")%>,
-       <% if isModelExchangeFMU then symbolName(modelNamePrefixStr,"read_simulation_info") else "NULL" %>,
-       <% if isModelExchangeFMU then symbolName(modelNamePrefixStr,"read_input_fmu") else "NULL" %>,
-       <% match modelStructure case SOME(FMIMODELSTRUCTURE(continuousPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"initialAnalyticJacobianFMIDER") else "NULL"%>,
-       <% match modelStructure case SOME(FMIMODELSTRUCTURE(continuousPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"functionJacFMIDER_column") else "NULL"%>,
-       <% match modelStructure case SOME(FMIMODELSTRUCTURE(continuousPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"INDEX_JAC_FMIDER") else "-1"%>,
-       <% match modelStructure case SOME(FMIMODELSTRUCTURE(initialPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"initialAnalyticJacobianFMIDERINIT") else "NULL"%>,
-       <% match modelStructure case SOME(FMIMODELSTRUCTURE(initialPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"functionJacFMIDERINIT_column") else "NULL"%>,
-       <% match modelStructure case SOME(FMIMODELSTRUCTURE(initialPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"INDEX_JAC_FMIDERINIT") else "-1"%>
+      <% if isModelExchangeFMU then "NULL" else '(int (*)(DATA *, threadData_t *, void *)) <%symbolName(modelNamePrefixStr,"performSimulation")%>'%>,    /* performSimulation */
+      <% if isModelExchangeFMU then "NULL" else '(int (*)(DATA *, threadData_t *, void *)) <%symbolName(modelNamePrefixStr,"performQSSSimulation")%>'%>,    /* performQSSSimulation */
+      <% if isModelExchangeFMU then "NULL" else '<%symbolName(modelNamePrefixStr,"updateContinuousSystem")%>'%>,    /* updateContinuousSystem */
+      <%symbolName(modelNamePrefixStr,"callExternalObjectDestructors")%>,    /* callExternalObjectDestructors */
+      <%if intEq(varInfo.numNonLinearSystems,0) then "NULL" else symbolName(modelNamePrefixStr,"initialNonLinearSystem")%>,    /* initialNonLinearSystem */
+      <%if intEq(varInfo.numLinearSystems,0) then "NULL" else symbolName(modelNamePrefixStr,"initialLinearSystem")%>,    /* initialLinearSystem */
+      <%if intEq(varInfo.numMixedSystems,0) then "NULL" else symbolName(modelNamePrefixStr,"initialMixedSystem")%>,    /* initialMixedSystem */
+      #if !defined(OMC_NO_STATESELECTION)
+      <%symbolName(modelNamePrefixStr,"initializeStateSets")%>,
+      #else
+      NULL,
+      #endif    /* initializeStateSets */
+      <%symbolName(modelNamePrefixStr,"initializeDAEmodeData")%>,
+      <%symbolName(modelNamePrefixStr,"computeVarIndices")%>,
+      <%symbolName(modelNamePrefixStr,"functionODE")%>,
+      <%symbolName(modelNamePrefixStr,"functionAlgebraics")%>,
+      <%symbolName(modelNamePrefixStr,"functionDAE")%>,
+      <%symbolName(modelNamePrefixStr,"functionLocalKnownVars")%>,
+      <%symbolName(modelNamePrefixStr,"input_function")%>,
+      <%symbolName(modelNamePrefixStr,"input_function_init")%>,
+      <%symbolName(modelNamePrefixStr,"input_function_updateStartValues")%>,
+      <%symbolName(modelNamePrefixStr,"data_function")%>,
+      <%symbolName(modelNamePrefixStr,"output_function")%>,
+      <%symbolName(modelNamePrefixStr,"setc_function")%>,
+      <%symbolName(modelNamePrefixStr,"setb_function")%>,
+      <%symbolName(modelNamePrefixStr,"function_storeDelayed")%>,
+      <%symbolName(modelNamePrefixStr,"function_storeSpatialDistribution")%>,
+      <%symbolName(modelNamePrefixStr,"function_initSpatialDistribution")%>,
+      <%symbolName(modelNamePrefixStr,"updateBoundVariableAttributes")%>,
+      <%symbolName(modelNamePrefixStr,"functionInitialEquations")%>,
+      <%if Config.adaptiveHomotopy() then (if Config.globalHomotopy() then '2' else '3') else (if Config.globalHomotopy() then '1' else '0')%>, /* useHomotopy - 0: local homotopy (equidistant lambda), 1: global homotopy (equidistant lambda), 2: new global homotopy approach (adaptive lambda), 3: new local homotopy approach (adaptive lambda)*/
+      <%if intEq(listLength(initialEquations_lambda0), 0) then "NULL" else '<%symbolName(modelNamePrefixStr,"functionInitialEquations_lambda0")%>'%>,
+      <%symbolName(modelNamePrefixStr,"functionRemovedInitialEquations")%>,
+      <%symbolName(modelNamePrefixStr,"updateBoundParameters")%>,
+      <%symbolName(modelNamePrefixStr,"checkForAsserts")%>,
+      <%symbolName(modelNamePrefixStr,"function_ZeroCrossingsEquations")%>,
+      <%symbolName(modelNamePrefixStr,"function_ZeroCrossings")%>,
+      <%symbolName(modelNamePrefixStr,"function_updateRelations")%>,
+      <%symbolName(modelNamePrefixStr,"zeroCrossingDescription")%>,
+      <%symbolName(modelNamePrefixStr,"relationDescription")%>,
+      <%symbolName(modelNamePrefixStr,"function_initSample")%>,
+      <%symbolName(modelNamePrefixStr,"INDEX_JAC_A")%>,
+      <%symbolName(modelNamePrefixStr,"INDEX_JAC_B")%>,
+      <%symbolName(modelNamePrefixStr,"INDEX_JAC_C")%>,
+      <%symbolName(modelNamePrefixStr,"INDEX_JAC_D")%>,
+      <%symbolName(modelNamePrefixStr,"INDEX_JAC_F")%>,
+      <%symbolName(modelNamePrefixStr,"INDEX_JAC_H")%>,
+      <%symbolName(modelNamePrefixStr,"INDEX_JAC_S")%>,
+      <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianA")%>,
+      <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianB")%>,
+      <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianC")%>,
+      <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianD")%>,
+      <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianF")%>,
+      <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianH")%>,
+      <%symbolName(modelNamePrefixStr,"initialAnalyticJacobianS")%>,
+      <%symbolName(modelNamePrefixStr,"functionJacA_column")%>,
+      <%symbolName(modelNamePrefixStr,"functionJacB_column")%>,
+      <%symbolName(modelNamePrefixStr,"functionJacC_column")%>,
+      <%symbolName(modelNamePrefixStr,"functionJacD_column")%>,
+      <%symbolName(modelNamePrefixStr,"functionJacF_column")%>,
+      <%symbolName(modelNamePrefixStr,"functionJacH_column")%>,
+      <%symbolName(modelNamePrefixStr,"functionJacS_column")%>,
+      <%symbolName(modelNamePrefixStr,"linear_model_frame")%>,
+      <%symbolName(modelNamePrefixStr,"linear_model_datarecovery_frame")%>,
+      <%symbolName(modelNamePrefixStr,"mayer")%>,
+      <%symbolName(modelNamePrefixStr,"lagrange")%>,
+      <%symbolName(modelNamePrefixStr,"getInputVarIndicesInOptimization")%>,
+      <%symbolName(modelNamePrefixStr,"pickUpBoundsForInputsInOptimization")%>,
+      <%symbolName(modelNamePrefixStr,"setInputData")%>,
+      <%symbolName(modelNamePrefixStr,"getTimeGrid")%>,
+      <%symbolName(modelNamePrefixStr,"symbolicInlineSystem")%>,
+      <%symbolName(modelNamePrefixStr,"function_initSynchronous")%>,
+      <%symbolName(modelNamePrefixStr,"function_updateSynchronous")%>,
+      <%symbolName(modelNamePrefixStr,"function_equationsSynchronous")%>,
+      <%symbolName(modelNamePrefixStr,"inputNames")%>,
+      <%symbolName(modelNamePrefixStr,"dataReconciliationInputNames")%>,
+      <%symbolName(modelNamePrefixStr,"dataReconciliationUnmeasuredVariables")%>,
+      <% if isModelExchangeFMU then symbolName(modelNamePrefixStr,"read_simulation_info") else "NULL" %>,
+      <% if isModelExchangeFMU then symbolName(modelNamePrefixStr,"read_input_fmu") else "NULL" %>,
+      <% match modelStructure case SOME(FMIMODELSTRUCTURE(continuousPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"initialAnalyticJacobianFMIDER") else "NULL"%>,
+      <% match modelStructure case SOME(FMIMODELSTRUCTURE(continuousPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"functionJacFMIDER_column") else "NULL"%>,
+      <% match modelStructure case SOME(FMIMODELSTRUCTURE(continuousPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"INDEX_JAC_FMIDER") else "-1"%>,
+      <% match modelStructure case SOME(FMIMODELSTRUCTURE(initialPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"initialAnalyticJacobianFMIDERINIT") else "NULL"%>,
+      <% match modelStructure case SOME(FMIMODELSTRUCTURE(initialPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"functionJacFMIDERINIT_column") else "NULL"%>,
+      <% match modelStructure case SOME(FMIMODELSTRUCTURE(initialPartialDerivatives=SOME(__))) then symbolName(modelNamePrefixStr,"INDEX_JAC_FMIDERINIT") else "-1"%>
     <%\n%>
     };
 
@@ -1843,8 +1851,8 @@ template symJacDefinition(list<JacobianMatrix> JacobianMatrices, String modelNam
   let symbolicJacsDefine = (JacobianMatrices |> jac as JAC_MATRIX(columns=jacColumn, seedVars=seedVars, matrixName=name, jacobianIndex=indexJacobian)  =>
     <<
     #define <%symbolName(modelNamePrefix,"INDEX_JAC_")%><%name%> <%indexJacobian%>
-    int <%symbolName(modelNamePrefix,"functionJac")%><%name%>_column(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *thisJacobian, ANALYTIC_JACOBIAN *parentJacobian);
-    int <%symbolName(modelNamePrefix,"initialAnalyticJacobian")%><%name%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian);
+    int <%symbolName(modelNamePrefix,"functionJac")%><%name%>_column(DATA* data, threadData_t *threadData, JACOBIAN *thisJacobian, JACOBIAN *parentJacobian);
+    int <%symbolName(modelNamePrefix,"initialAnalyticJacobian")%><%name%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian);
     <%genericCallHeaders(jac.generic_loop_calls, createJacContext(jac.crefsHT))%>
     >>
     ;separator="\n\n";empty)
@@ -2436,9 +2444,9 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
          threadData_t *threadData = userData->threadData;
          const int equationIndexes[2] = {1,<%ls.index%>};
          <% if ls.partOfJac then
-           'ANALYTIC_JACOBIAN* parentJacobian = data->simulationInfo->linearSystemData[<%ls.indexLinearSystem%>].parDynamicData[omc_get_thread_num()].parentJacobian;'
+           'JACOBIAN* parentJacobian = data->simulationInfo->linearSystemData[<%ls.indexLinearSystem%>].parDynamicData[omc_get_thread_num()].parentJacobian;'
          %>
-         ANALYTIC_JACOBIAN* jacobian = NULL;
+         JACOBIAN* jacobian = NULL;
          <%varDeclsRes%>
          <% if profileAll() then 'SIM_PROF_TICK_EQ(<%ls.index%>);' %>
          <% if profileSome() then 'SIM_PROF_ADD_NCALL_EQ(modelInfoGetEquation(&data->modelData->modelDataXml,<%ls.index%>).profileBlockIndex,1);' %>
@@ -2474,7 +2482,7 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
        void setLinearMatrixA<%ls.index%>(DATA* data, threadData_t* threadData, LINEAR_SYSTEM_DATA* linearSystemData)
        {
          const int equationIndexes[2] = {1,<%ls.index%>};
-         <% if ls.partOfJac then 'ANALYTIC_JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
+         <% if ls.partOfJac then 'JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
          <%varDecls%>
          <%MatrixA%>
        }
@@ -2482,7 +2490,7 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
        void setLinearVectorb<%ls.index%>(DATA* data, threadData_t* threadData, LINEAR_SYSTEM_DATA* linearSystemData)
        {
          const int equationIndexes[2] = {1,<%ls.index%>};
-         <% if ls.partOfJac then 'ANALYTIC_JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
+         <% if ls.partOfJac then 'JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
          <%varDecls2%>
          <%vectorb%>
        }
@@ -2547,9 +2555,9 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
          threadData_t *threadData = userData->threadData;
          const int equationIndexes[2] = {1,<%ls.index%>};
          <% if ls.partOfJac then
-           'ANALYTIC_JACOBIAN* parentJacobian = data->simulationInfo->linearSystemData[<%ls.indexLinearSystem%>].parDynamicData[omc_get_thread_num()].parentJacobian;'
+           'JACOBIAN* parentJacobian = data->simulationInfo->linearSystemData[<%ls.indexLinearSystem%>].parDynamicData[omc_get_thread_num()].parentJacobian;'
          %>
-         ANALYTIC_JACOBIAN* jacobian = NULL;
+         JACOBIAN* jacobian = NULL;
          <%varDeclsRes%>
          <% if profileAll() then 'SIM_PROF_TICK_EQ(<%ls.index%>);' %>
          <% if profileSome() then 'SIM_PROF_ADD_NCALL_EQ(modelInfoGetEquation(&data->modelData->modelDataXml,<%ls.index%>).profileBlockIndex,1);' %>
@@ -2572,9 +2580,9 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
          threadData_t *threadData = userData->threadData;
          const int equationIndexes[2] = {1,<%at.index%>};
          <% if ls.partOfJac then
-           'ANALYTIC_JACOBIAN* parentJacobian = data->simulationInfo->linearSystemData[<%ls.indexLinearSystem%>].parDynamicData[omc_get_thread_num()].parentJacobian;'
+           'JACOBIAN* parentJacobian = data->simulationInfo->linearSystemData[<%ls.indexLinearSystem%>].parDynamicData[omc_get_thread_num()].parentJacobian;'
          %>
-         ANALYTIC_JACOBIAN* jacobian = NULL;
+         JACOBIAN* jacobian = NULL;
          <%varDeclsRes2%>
          <% if profileAll() then 'SIM_PROF_TICK_EQ(<%at.index%>);' %>
          <% if profileSome() then 'SIM_PROF_ADD_NCALL_EQ(modelInfoGetEquation(&data->modelData->modelDataXml,<%at.index%>).profileBlockIndex,1);' %>
@@ -2628,7 +2636,7 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
        void setLinearMatrixA<%ls.index%>(DATA* data, LINEAR_SYSTEM_DATA *linearSystemData)
        {
          const int equationIndexes[2] = {1,<%ls.index%>};
-         <% if ls.partOfJac then 'ANALYTIC_JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
+         <% if ls.partOfJac then 'JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
          <%varDecls%>
          <%MatrixA%>
        }
@@ -2636,7 +2644,7 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
        void setLinearVectorb<%ls.index%>(DATA* data, LINEAR_SYSTEM_DATA* linearSystemData)
        {
          const int equationIndexes[2] = {1,<%ls.index%>};
-         <% if ls.partOfJac then 'ANALYTIC_JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
+         <% if ls.partOfJac then 'JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
          <%varDecls2%>
          <%vectorb%>
        }
@@ -2648,7 +2656,7 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
        void setLinearMatrixA<%at.index%>(DATA* data, LINEAR_SYSTEM_DATA* linearSystemData)
        {
          const int equationIndexes[2] = {1,<%at.index%>};
-         <% if ls.partOfJac then 'ANALYTIC_JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
+         <% if ls.partOfJac then 'JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
          <%varDecls3%>
          <%MatrixA2%>
        }
@@ -2656,7 +2664,7 @@ template functionSetupLinearSystems(list<SimEqSystem> linearSystems, String mode
        void setLinearVectorb<%at.index%>(DATA* data, LINEAR_SYSTEM_DATA* linearSystemData)
        {
          const int equationIndexes[2] = {1,<%at.index%>};
-         <% if ls.partOfJac then 'ANALYTIC_JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
+         <% if ls.partOfJac then 'JACOBIAN* parentJacobian = linearSystemData->parDynamicData[omc_get_thread_num()].parentJacobian;'%>
          <%varDecls4%>
          <%vectorb2%>
        }
@@ -5677,7 +5685,7 @@ template initialAnalyticJacobians(list<JacobianColumn> jacobianColumn, list<SimV
 match sparsepattern
   case {} then
     <<
-    int <%symbolName(modelNamePrefix,"initialAnalyticJacobian")%><%matrixname%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian)
+    int <%symbolName(modelNamePrefix,"initialAnalyticJacobian")%><%matrixname%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian)
     {
       TRACE_PUSH
       TRACE_POP
@@ -5697,17 +5705,18 @@ match sparsepattern
     let constantEqns = (jacobianColumn |> JAC_COLUMN(constantEqns=constantEqns) =>
       match constantEqns case {} then 'NULL' case _ then '<%symbolName(modelNamePrefix,"functionJac")%><%matrixname%>_constantEqns'
       ;separator="")
+    let evalColumn = '<%symbolName(modelNamePrefix,"functionJac")%><%matrixname%>_column'
     let sizeCols = listLength(seedVars)
     <<
     OMC_DISABLE_OPT
-    int <%symbolName(modelNamePrefix,"initialAnalyticJacobian")%><%matrixname%>(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian)
+    int <%symbolName(modelNamePrefix,"initialAnalyticJacobian")%><%matrixname%>(DATA* data, threadData_t *threadData, JACOBIAN *jacobian)
     {
       TRACE_PUSH
       size_t count;
 
       FILE* pFile = openSparsePatternFile(data, threadData, "<%fileName%>");
 
-      initAnalyticJacobian(jacobian, <%sizeCols%>, <%sizeRows%>, <%tmpvarsSize%>, <%constantEqns%>, jacobian->sparsePattern);
+      initJacobian(jacobian, <%sizeCols%>, <%sizeRows%>, <%tmpvarsSize%>, <%evalColumn%>, <%constantEqns%>, NULL);
       jacobian->sparsePattern = allocSparsePattern(<%sizeleadindex%>, <%sp_size_index%>, <%maxColor%>);
       jacobian->availability = <%availability%>;
 
@@ -5743,7 +5752,7 @@ template generateMatrix(list<JacobianColumn> jacobianColumn, list<SimVar> seedVa
   match nRows
   case "0" then
     <<
-    int <%symbolName(modelNamePrefix,"functionJac")%><%matrixname%>_column(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian, ANALYTIC_JACOBIAN *parentJacobian)
+    int <%symbolName(modelNamePrefix,"functionJac")%><%matrixname%>_column(DATA* data, threadData_t *threadData, JACOBIAN *jacobian, JACOBIAN *parentJacobian)
     {
       TRACE_PUSH
       TRACE_POP
@@ -5754,7 +5763,7 @@ template generateMatrix(list<JacobianColumn> jacobianColumn, list<SimVar> seedVa
     match seedVars
      case {} then
         <<
-        int <%symbolName(modelNamePrefix,"functionJac")%><%matrixname%>_column(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian, ANALYTIC_JACOBIAN *parentJacobian)
+        int <%symbolName(modelNamePrefix,"functionJac")%><%matrixname%>_column(DATA* data, threadData_t *threadData, JACOBIAN *jacobian, JACOBIAN *parentJacobian)
         {
           TRACE_PUSH
           TRACE_POP
@@ -5780,7 +5789,7 @@ template generateConstantEqns(list<SimEqSystem> constantEqns, String matrixName,
 ::=
     <<
     OMC_DISABLE_OPT
-    int <%symbolName(modelNamePrefix,"functionJac")%><%matrixName%>_constantEqns(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian, ANALYTIC_JACOBIAN *parentJacobian)
+    int <%symbolName(modelNamePrefix,"functionJac")%><%matrixName%>_constantEqns(DATA* data, threadData_t *threadData, JACOBIAN *jacobian, JACOBIAN *parentJacobian)
     {
       TRACE_PUSH
 
@@ -5808,7 +5817,7 @@ template functionJac(list<SimEqSystem> jacEquations, list<SimEqSystem> constantE
 
   <%constantEqns2%>
 
-  int <%symbolName(modelNamePrefix,"functionJac")%><%matrixName%>_column(DATA* data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian, ANALYTIC_JACOBIAN *parentJacobian)
+  int <%symbolName(modelNamePrefix,"functionJac")%><%matrixName%>_column(DATA* data, threadData_t *threadData, JACOBIAN *jacobian, JACOBIAN *parentJacobian)
   {
     TRACE_PUSH
 
@@ -5908,6 +5917,8 @@ template equation_arrayFormat(SimEqSystem eq, String name, Context context, Inte
     then equationSimpleAssign(e, context, &varD, &tempeqns)
   case e as SES_ARRAY_CALL_ASSIGN(__)
     then equationArrayCallAssign(e, context, &varD, &tempeqns)
+  case e as SES_RESIZABLE_ASSIGN(__)
+    then equationGenericAssign(e, context, &varD, &tempeqns, modelNamePrefix)
   case e as SES_GENERIC_ASSIGN(__)
     then equationGenericAssign(e, context, &varD, &tempeqns, modelNamePrefix)
   case e as SES_ENTWINED_ASSIGN(__)
@@ -6018,6 +6029,9 @@ template equation_impl2(Integer base_idx, Integer sub_idx, SimEqSystem eq, Conte
         case e as SES_ARRAY_CALL_ASSIGN(__)
         then equationArrayCallAssign(e, context, &varD, &tempeqns)
 
+        case e as SES_RESIZABLE_ASSIGN(__)
+        then equationGenericAssign(e, context, &varD, &tempeqns, modelNamePrefix)
+
         case e as SES_GENERIC_ASSIGN(__)
         then equationGenericAssign(e, context, &varD, &tempeqns, modelNamePrefix)
 
@@ -6126,7 +6140,7 @@ template equation_impl2(Integer base_idx, Integer sub_idx, SimEqSystem eq, Conte
         /*
         <%dumpEqs(fill(eq,1))%>
         */
-        <%OMC_NO_OPT%><% if static then "static "%>void <%symbolName(modelNamePrefix,"eqFunction")%>_<%ix%>(DATA *data, threadData_t *threadData, ANALYTIC_JACOBIAN *jacobian, ANALYTIC_JACOBIAN *parentJacobian)
+        <%OMC_NO_OPT%><% if static then "static "%>void <%symbolName(modelNamePrefix,"eqFunction")%>_<%ix%>(DATA *data, threadData_t *threadData, JACOBIAN *jacobian, JACOBIAN *parentJacobian)
         {
           TRACE_PUSH
           <%baseClockIndex_%>
@@ -6348,14 +6362,26 @@ template equationGenericAssign(SimEqSystem eq, Context context,
 <<
 <%modelicaLine(eqInfo(eq))%>
 <%match eq
-
+case eqn as SES_RESIZABLE_ASSIGN() then
+  let &preExp = buffer ""
+  let &sub = buffer ""
+  let jac = match context case JACOBIAN_CONTEXT() then ", jacobian" else ""
+  let forIter = (iters |> it => forIterator(it, context, &preExp, &varDecls, &auxFunction, &sub);separator="\n";empty)
+  let forNames = (iters |> it => forIteratorName(it, context, &preExp, &varDecls, &auxFunction, &sub);separator=", ";empty)
+  let forTail = (iters |> it => "}";separator="\n";empty)
+  <<
+    <%forIter%>
+    <%preExp%>
+    genericCall_<%call_index%>(data, threadData<%jac%>, equationIndexes, <%forNames%>); /*<%symbolName(modelNamePrefix,"genericCall")%>*/
+    <%forTail%>
+  >>
 case eqn as SES_GENERIC_ASSIGN() then
   let idx_len = listLength(scal_indices)
   let jac = match context case JACOBIAN_CONTEXT() then ", jacobian" else ""
   <<
   const int idx_lst[<%idx_len%>] = {<%(scal_indices |> idx => '<%idx%>';separator=", ")%>};
   for(int i=0; i<<%idx_len%>; i++)
-    genericCall_<%call_index%>(data, threadData<%jac%>, idx_lst[i]); /*<%symbolName(modelNamePrefix,"genericCall")%>*/
+    genericCall_<%call_index%>(data, threadData<%jac%>, equationIndexes, idx_lst[i]); /*<%symbolName(modelNamePrefix,"genericCall")%>*/
   >>
 %>
 <%endModelicaLine()%>
@@ -6417,7 +6443,7 @@ case eqn as SES_GENERIC_ASSIGN() then
   let jac = match context case JACOBIAN_CONTEXT() then ", jacobian" else ""
   <<
     case <%call_index%>:
-      genericCall_<%call_index%>(data, threadData<%jac%>, idx_lst_<%call_index%>[call_indices[<%i0%>]]);
+      genericCall_<%call_index%>(data, threadData<%jac%>, equationIndexes, idx_lst_<%call_index%>[call_indices[<%i0%>]]);
       call_indices[<%i0%>]++;
       break;
   >>
@@ -6752,7 +6778,7 @@ template whenOperators(list<WhenOperator> whenOps, Context context, Text &varDec
     case ASSIGN(left = lhs as DAE.TUPLE(PR = expLst as firstexp::_), right = DAE.CALL(attr=CALL_ATTR(ty=T_TUPLE(types=ntys)))) then
     let &preExp = buffer ""
     let &postExp = buffer ""
-    let lhsCrefs = (List.rest(expLst) |> e => " ," + tupleReturnVariableUpdates(e, context, varDecls, preExp, postExp, &auxFunction))
+    let lhsCrefs = (listRest(expLst) |> e => " ," + tupleReturnVariableUpdates(e, context, varDecls, preExp, postExp, &auxFunction))
     // The tuple expressions might take fewer variables than the number of outputs. No worries.
     let lhsCrefs2 = lhsCrefs + List.fill(", NULL", intMax(0,intSub(listLength(ntys),listLength(expLst))))
     let call = daeExpCallTuple(right, lhsCrefs2, context, &preExp, &varDecls, &auxFunction)
@@ -6913,7 +6939,7 @@ end simulationLiteralsFile;
   %>
 
   <%functionBodies(functions,true)%>
-  <%genericCallBodies(genericCalls, contextOther)%>
+  <%genericCallBodies(genericCalls, contextSimulationNonDiscrete)%>
 
   #ifdef __cplusplus
   }
@@ -7142,6 +7168,7 @@ template simEqAttrIsDiscreteKind(SimEqSystem eq)
   case SES_SIMPLE_ASSIGN(__)
   case SES_SIMPLE_ASSIGN_CONSTRAINTS(__)
   case SES_ARRAY_CALL_ASSIGN(__)
+  case SES_RESIZABLE_ASSIGN(__)
   case SES_GENERIC_ASSIGN(__)
   case SES_ENTWINED_ASSIGN(__)
   case SES_IFEQUATION(__)
@@ -7178,6 +7205,7 @@ template simEqAttrEval(SimEqSystem eq)
   case SES_SIMPLE_ASSIGN(__)
   case SES_SIMPLE_ASSIGN_CONSTRAINTS(__)
   case SES_ARRAY_CALL_ASSIGN(__)
+  case SES_RESIZABLE_ASSIGN(__)
   case SES_GENERIC_ASSIGN(__)
   case SES_ENTWINED_ASSIGN(__)
   case SES_IFEQUATION(__)
@@ -7216,28 +7244,31 @@ end eqEval;
 template optimizationComponents( list<DAE.ClassAttributes> classAttributes ,SimCode simCode, String modelNamePrefixStr)
   "Generates C for Objective Functions."
 ::=
-    match classAttributes
-    case{} then
-        let fail = 'throwStreamPrint(NULL, "The model was not compiled with -g=Optimica and the corresponding goal function. The optimization solver cannot be used.");<%\n%>return 0;'
-        <<
-        int <%symbolName(modelNamePrefixStr,"mayer")%>(DATA* data, modelica_real** res,short *i) {
-          <%fail%>
-        }
-        int <%symbolName(modelNamePrefixStr,"lagrange")%>(DATA* data, modelica_real** res, short * i1, short*i2) {
-          <%fail%>
-        }
-        int <%symbolName(modelNamePrefixStr,"pickUpBoundsForInputsInOptimization")%>(DATA* data, modelica_real* min, modelica_real* max, modelica_real*nominal, modelica_boolean *useNominal, char ** name, modelica_real * start, modelica_real * startTimeOpt) {
-          <%fail%>
-        }
-        int <%symbolName(modelNamePrefixStr,"setInputData")%>(DATA *data, const modelica_boolean file) {
-          <%fail%>
-        }
-        int <%symbolName(modelNamePrefixStr,"getTimeGrid")%>(DATA *data, modelica_integer * nsi, modelica_real**t) {
-          <%fail%>
-        }
-        >>
-      else
-        (classAttributes |> classAttribute => optimizationComponents1(classAttribute,simCode, modelNamePrefixStr); separator="\n")
+  match classAttributes
+    case {} then
+      let fail = 'throwStreamPrint(NULL, "The model was not compiled with -g=Optimica and the corresponding goal function. The optimization solver cannot be used.");<%\n%>return 0;'
+      <<
+      int <%symbolName(modelNamePrefixStr,"mayer")%>(DATA* data, modelica_real** res,short *i) {
+        <%fail%>
+      }
+      int <%symbolName(modelNamePrefixStr,"lagrange")%>(DATA* data, modelica_real** res, short * i1, short*i2) {
+        <%fail%>
+      }
+      int <%symbolName(modelNamePrefixStr,"getInputVarIndicesInOptimization")%>(DATA* data, int* input_var_indices) {
+        <%fail%>
+      }
+      int <%symbolName(modelNamePrefixStr,"pickUpBoundsForInputsInOptimization")%>(DATA* data, modelica_real* min, modelica_real* max, modelica_real*nominal, modelica_boolean *useNominal, char ** name, modelica_real * start, modelica_real * startTimeOpt) {
+        <%fail%>
+      }
+      int <%symbolName(modelNamePrefixStr,"setInputData")%>(DATA *data, const modelica_boolean file) {
+        <%fail%>
+      }
+      int <%symbolName(modelNamePrefixStr,"getTimeGrid")%>(DATA *data, modelica_integer * nsi, modelica_real**t) {
+        <%fail%>
+      }
+      >>
+    else
+      (classAttributes |> classAttribute => optimizationComponents1(classAttribute, simCode, modelNamePrefixStr); separator="\n")
 end optimizationComponents;
 
 template optimizationComponents1(ClassAttributes classAttribute, SimCode simCode, String modelNamePrefixStr)
@@ -7255,12 +7286,12 @@ template optimizationComponents1(ClassAttributes classAttribute, SimCode simCode
       let objectiveFunction = match objetiveE
         case SOME(exp) then
           let setMayerIndex = if stringEq(crefToIndex(createDifferentiatedCrefName(makeUntypedCrefIdent(BackendDAE.optimizationMayerTermName), makeUntypedCrefIdent("dummyVarC"), "C")), "-2") then '' else
+            <<
+            *index_Dres = <%crefToIndex(createDifferentiatedCrefName(makeUntypedCrefIdent(BackendDAE.optimizationMayerTermName), makeUntypedCrefIdent("dummyVarC"), "C"))%>;
+            return 0;
+            >>
           <<
-          *index_Dres = <%crefToIndex(createDifferentiatedCrefName(makeUntypedCrefIdent(BackendDAE.optimizationMayerTermName), makeUntypedCrefIdent("dummyVarC"), "C"))%>;
-          return 0;
-          >>
-          <<
-          *res =  &<%cref(makeUntypedCrefIdent(BackendDAE.optimizationMayerTermName), &sub)%>;
+          *res = &<%cref(makeUntypedCrefIdent(BackendDAE.optimizationMayerTermName), &sub)%>;
           <%setMayerIndex%>
           >>
 
@@ -7274,11 +7305,11 @@ template optimizationComponents1(ClassAttributes classAttribute, SimCode simCode
       let objectiveIntegrand = match objectiveIntegrandE
         case SOME(exp) then
           let setLagrangeIndex = if stringEq(crefToIndex(createDifferentiatedCrefName(makeUntypedCrefIdent(BackendDAE.optimizationLagrangeTermName), makeUntypedCrefIdent("dummyVarB"), "B")), "-2") then '' else
-          <<
-          *index_DresB = <%crefToIndex(createDifferentiatedCrefName(makeUntypedCrefIdent(BackendDAE.optimizationLagrangeTermName), makeUntypedCrefIdent("dummyVarB"), "B"))%>;
-          *index_DresC = <%crefToIndex(createDifferentiatedCrefName(makeUntypedCrefIdent(BackendDAE.optimizationLagrangeTermName), makeUntypedCrefIdent("dummyVarC"), "C"))%>;
-          return 0;
-          >>
+            <<
+            *index_DresB = <%crefToIndex(createDifferentiatedCrefName(makeUntypedCrefIdent(BackendDAE.optimizationLagrangeTermName), makeUntypedCrefIdent("dummyVarB"), "B"))%>;
+            *index_DresC = <%crefToIndex(createDifferentiatedCrefName(makeUntypedCrefIdent(BackendDAE.optimizationLagrangeTermName), makeUntypedCrefIdent("dummyVarC"), "C"))%>;
+            return 0;
+            >>
           <<
           *res =  &<%cref(makeUntypedCrefIdent(BackendDAE.optimizationLagrangeTermName), &sub)%>;
           <%setLagrangeIndex%>
@@ -7288,9 +7319,9 @@ template optimizationComponents1(ClassAttributes classAttribute, SimCode simCode
         case simCode as SIMCODE(__) then
           match modelInfo
             case MODELINFO(vars=SIMVARS(__)) then
-            <<
+              <<
               if(file){
-              <%vars.inputVars |> SIMVAR(varKind = OPT_LOOP_INPUT(replaceExp=cr)) hasindex i0 =>
+              <%vars.inputVars |> SIMVAR(varKind = OPT_LOOP_INPUT(replaceExp=cr)) =>
               '<%cref(name, &sub)%> = <%cref(cr, &sub)%> ;'
               ;separator="\n"
               %>
@@ -7299,21 +7330,21 @@ template optimizationComponents1(ClassAttributes classAttribute, SimCode simCode
               'data->simulationInfo->inputVars[<%i0%>] = <%cref(name, &sub)%>;'
               ;separator="\n"
               %>
-            >>
+              >>
 
       let getTG = match simCode
         case simCode as SIMCODE(__) then
           match modelInfo
             case MODELINFO(vars=SIMVARS(__)) then
-            <<
-              *nsi=(-1 <%vars.paramVars |> SIMVAR(varKind=OPT_TGRID(__)) hasindex i0 => '+1'
-               ;separator=" "%>);
+              <<
+              *nsi=(-1 <%vars.paramVars |> SIMVAR(varKind=OPT_TGRID(__)) => '+1'
+                ;separator=" "%>);
               *t = (modelica_real*) malloc((*nsi+1)*sizeof(modelica_real));
               <%vars.paramVars |> SIMVAR(varKind=OPT_TGRID(__)) hasindex i0 =>
               '(*t)[<%i0%>] = <%cref(name, &sub)%>;'
               ;separator="\n"
               %>
-            >>
+              >>
 
       let inputBounds = match simCode
         case simCode as SIMCODE(__) then
@@ -7324,46 +7355,63 @@ template optimizationComponents1(ClassAttributes classAttribute, SimCode simCode
               'min[<%i0%>] = <%crefAttributes(name)%>.min;<%\n%>max[<%i0%>] = <%crefAttributes(name)%>.max;<%\n%>nominal[<%i0%>] = <%crefAttributes(name)%>.nominal;<%\n%>useNominal[<%i0%>] = <%crefAttributes(name)%>.useNominal;<%\n%>name[<%i0%>] =(char *) <%crefVarInfo(name)%>.name;<%\n%>start[<%i0%>] = <%crefAttributes(name)%>.start;'
               ;separator="\n"%>
               >>
-           <<
-           <%auxFunction%>
-           /* objectiveFunction */
-           int <%symbolName(modelNamePrefixStr,"mayer")%>(DATA* data, modelica_real** res, short * index_Dres)
-           {
-             <%varDecls%>
-             <%preExp%>
-             <%objectiveFunction%>
-             return  -1;
-           }
-           /* objectiveIntegrand */
-           int <%symbolName(modelNamePrefixStr,"lagrange")%>(DATA* data, modelica_real** res, short * index_DresB, short *index_DresC)
-           {
-             <%varDecls1%>
-             <%preExp1%>
-             <%objectiveIntegrand%>
-             return -1;
-           }
 
-           /* opt vars  */
-           int <%symbolName(modelNamePrefixStr,"pickUpBoundsForInputsInOptimization")%>(DATA* data, modelica_real* min, modelica_real* max, modelica_real*nominal, modelica_boolean *useNominal, char ** name, modelica_real * start, modelica_real* startTimeOpt)
-           {
-             <%inputBounds%>
-             *startTimeOpt = data->simulationInfo->startTime - 1.0;
-             <%startTimeOpt%>
-             return 0;
-           }
+      let inputIndices = match simCode
+        case simCode as SIMCODE(__) then
+          match modelInfo
+            case MODELINFO(vars=SIMVARS(__)) then
+              <<
+              <%vars.inputVars |> SIMVAR(__) hasindex i0 =>
+              'input_var_indices[<%i0%>] = <%crefIndexWithComment(name)%>;'
+              ;separator="\n"%>
+              >>
+      <<
+      <%auxFunction%>
+      /* objectiveFunction */
+      int <%symbolName(modelNamePrefixStr,"mayer")%>(DATA* data, modelica_real** res, short * index_Dres)
+      {
+        <%varDecls%>
+        <%preExp%>
+        <%objectiveFunction%>
+        return  -1;
+      }
+      /* objectiveIntegrand */
+      int <%symbolName(modelNamePrefixStr,"lagrange")%>(DATA* data, modelica_real** res, short * index_DresB, short *index_DresC)
+      {
+        <%varDecls1%>
+        <%preExp1%>
+        <%objectiveIntegrand%>
+        return -1;
+      }
 
-           int <%symbolName(modelNamePrefixStr,"setInputData")%>(DATA *data, const modelica_boolean file)
-           {
-            TRACE_PUSH
-            <%setInput%>
-            TRACE_POP
-            return 0;
-           }
-           int <%symbolName(modelNamePrefixStr,"getTimeGrid")%>(DATA *data, modelica_integer * nsi, modelica_real**t){
-            <%getTG%>
-            return 0;
-           }
-           >>
+      /* fill buffer with optimization input indices */
+      int <%symbolName(modelNamePrefixStr,"getInputVarIndicesInOptimization")%>(DATA* data, int* input_var_indices)
+      {
+        <%inputIndices%>
+        return 0;
+      }
+
+      /* opt vars  */
+      int <%symbolName(modelNamePrefixStr,"pickUpBoundsForInputsInOptimization")%>(DATA* data, modelica_real* min, modelica_real* max, modelica_real*nominal, modelica_boolean *useNominal, char ** name, modelica_real * start, modelica_real* startTimeOpt)
+      {
+        <%inputBounds%>
+        *startTimeOpt = data->simulationInfo->startTime - 1.0;
+        <%startTimeOpt%>
+        return 0;
+      }
+
+      int <%symbolName(modelNamePrefixStr,"setInputData")%>(DATA *data, const modelica_boolean file)
+      {
+        TRACE_PUSH
+        <%setInput%>
+        TRACE_POP
+        return 0;
+      }
+      int <%symbolName(modelNamePrefixStr,"getTimeGrid")%>(DATA *data, modelica_integer * nsi, modelica_real**t){
+        <%getTG%>
+        return 0;
+      }
+      >>
     else error(sourceInfo(), 'Unknown Constraint List')
 end optimizationComponents1;
 
@@ -7436,8 +7484,9 @@ end equationNames_Partial;
 template genericCallBodies(list<SimGenericCall> genericCalls, Context context)
  "Generates the body for a set of generic calls."
 ::=
-  let jac = match context case JACOBIAN_CONTEXT() then ", ANALYTIC_JACOBIAN *jacobian" else ""
+  let jac = match context case JACOBIAN_CONTEXT() then ", JACOBIAN *jacobian" else ""
   (genericCalls |> call =>
+    let comment = escapeCComments(simGenericCallString(call))
     let &sub = buffer ""
     let &preExp = buffer ""
     let &varDecls = buffer ""
@@ -7445,52 +7494,81 @@ template genericCallBodies(list<SimGenericCall> genericCalls, Context context)
 
     match call
     case SINGLE_GENERIC_CALL() then
-      let lhs_ = daeExp(lhs, context, &preExp, &varDecls, &auxFunction)
-      let rhs_ = daeExp(rhs, context, &preExp, &varDecls, &auxFunction)
-      let iter_ = (iters |> iter => genericIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n")
+      let body_ = genericCallLhsRhs(lhs, rhs, context, &preExp, &varDecls, &auxFunction)
+      let iter_ = if resizable then (iters |> iter => resizableIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n") else (iters |> iter => genericIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n")
+      let idx_ = if resizable then (iters |> it => 'modelica_integer <%forIteratorName(it, context, &preExp, &varDecls, &auxFunction, &sub)%>';separator=", ";empty) else "int idx"
+      let idx_copy = if resizable then "" else "int tmp = idx;"
       <<
-      void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, int idx)
+      /*
+      <%comment%>
+      */
+      <%auxFunction%>
+      void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, const int equationIndexes[2], <%idx_%>)
       {
-        int tmp = idx;
-        <%iter_%>
+        <%idx_copy%>
         <%varDecls%>
-        <%auxFunction%>
         <%preExp%>
-        <%lhs_%> = <%rhs_%>;
+        <%iter_%>
+        <%body_%>;
       }
       >>
 
     case IF_GENERIC_CALL() then
-      let iter_ = (iters |> iter => genericIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n")
+      let iter_ = if resizable then (iters |> iter => resizableIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n") else (iters |> iter => genericIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n")
       let branches_ = (branches |> branch => genericBranch(branch, context, &preExp, &varDecls, &auxFunction, &sub); separator = " else ")
+      let idx_ = if resizable then (iters |> it => 'modelica_integer <%forIteratorName(it, context, &preExp, &varDecls, &auxFunction, &sub)%>';separator=", ";empty) else "int idx"
+      let idx_copy = if resizable then "" else "int tmp = idx;"
       <<
-      void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, int idx)
+      /*
+      <%comment%>
+      */
+      <%auxFunction%>
+      void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, const int equationIndexes[2], <%idx_%>)
       {
-        int tmp = idx;
-        <%iter_%>
+        <%idx_copy%>
         <%varDecls%>
-        <%auxFunction%>
         <%preExp%>
+        <%iter_%>
         <%branches_%>
       }
       >>
 
     case WHEN_GENERIC_CALL() then
-      let iter_ = (iters |> iter => genericIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n")
+      let iter_ = if resizable then (iters |> iter => resizableIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n") else (iters |> iter => genericIterator(iter, context, &preExp, &varDecls, &auxFunction, &sub); separator = "\n")
       let branches_ = (branches |> branch => genericBranch(branch, context, &preExp, &varDecls, &auxFunction, &sub); separator = " else ")
+      let idx_ = if resizable then (iters |> it => 'modelica_integer <%forIteratorName(it, context, &preExp, &varDecls, &auxFunction, &sub)%>';separator=", ";empty) else "int idx"
+      let idx_copy = if resizable then "" else "int tmp = idx;"
       <<
-      void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, int idx)
+      /*
+      <%comment%>
+      */
+      <%auxFunction%>
+      void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, const int equationIndexes[2], <%idx_%>)
       {
-        int tmp = idx;
-        <%iter_%>
+        <%idx_copy%>
         <%varDecls%>
-        <%auxFunction%>
         <%preExp%>
+        <%iter_%>
         <%branches_%>
       }
       >>
   ; separator="\n\n")
 end genericCallBodies;
+
+template genericCallLhsRhs(DAE.Exp lhs, DAE.Exp rhs, Context context, Text &preExp, Text &varDecls, Text &auxFunction)
+::= match lhs
+    case CREF(componentRef=cr, ty = T_ARRAY()) then
+      let rhs_ = daeExp(rhs, context, &preExp, &varDecls, &auxFunction)
+      <<
+      <%algStmtAssignArrWithRhsExpStr(lhs, rhs_, context, &preExp, &varDecls, &auxFunction)%>
+      >>
+    else
+      let lhs_ = daeExp(lhs, context, &preExp, &varDecls, &auxFunction)
+      let rhs_ = daeExp(rhs, context, &preExp, &varDecls, &auxFunction)
+      <<
+      <%lhs_%> = <%rhs_%>;
+      >>
+end genericCallLhsRhs;
 
 template genericBranch(SimBranch branch, Context context, Text &preExp, Text &varDecls, Text &auxFunction, Text &sub)
 ::= match branch
@@ -7522,36 +7600,62 @@ template genericIterator(SimIterator iter, Context context, Text &preExp, Text &
 ::= match iter
   case SIM_ITERATOR_RANGE() then
     let iter_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+    let start_ = daeExp(start, context, &preExp, &varDecls, &auxFunction)
+    let step_ = daeExp(step, context, &preExp, &varDecls, &auxFunction)
+    let size_ = daeExp(size, context, &preExp, &varDecls, &auxFunction)
+    let sub_iter_ = (sub_iter |> sub_i => subIterator(sub_i, iter_, context, &preExp, &varDecls, &auxFunction, &sub); separator="\n")
     <<
-    int <%iter_%>_loc = tmp % <%size%>;
-    int <%iter_%> = <%step%> * <%iter_%>_loc + <%start%>;
-    tmp /= <%size%>;
+    int <%iter_%>_loc = tmp % <%size_%>;
+    int <%iter_%> = <%step_%> * <%iter_%>_loc + <%start_%>;
+    tmp /= <%size_%>;
+    <%sub_iter_%>
     >>
   case SIM_ITERATOR_LIST() then
     let iter_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+    let sub_iter_ = (sub_iter |> sub_i => subIterator(sub_i, iter_, context, &preExp, &varDecls, &auxFunction, &sub); separator="\n")
     let arr = (lst |> elem => '<%elem%>'; separator=", ")
     <<
     static const int <%iter_%>_lst[<%size%>] = {<%arr%>};
     int <%iter_%>_loc = tmp % <%size%>;
     int <%iter_%> = <%iter_%>_lst[<%iter_%>_loc];
     tmp /= <%size%>;
+    <%sub_iter_%>
     >>
 end genericIterator;
+
+template resizableIterator(SimIterator iter, Context context, Text &preExp, Text &varDecls, Text &auxFunction, Text &sub)
+::= match iter
+  case SIM_ITERATOR_RANGE() then
+    let iter_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+    let sub_iter_ = (sub_iter |> sub_i => subIterator(sub_i, iter_, context, &preExp, &varDecls, &auxFunction, &sub); separator="\n")
+    <<
+    <%sub_iter_%>
+    >>
+  case SIM_ITERATOR_LIST() then
+    let iter_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+    let sub_iter_ = (sub_iter |> sub_i => subIterator(sub_i, iter_, context, &preExp, &varDecls, &auxFunction, &sub); separator="\n")
+    <<
+    <%sub_iter_%>
+    >>
+end resizableIterator;
 
 template forIterator(SimIterator iter, Context context, Text &preExp, Text &varDecls, Text &auxFunction, Text &sub)
 ::= match iter
   case SIM_ITERATOR_RANGE() then
     let iter_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
-    let rel = if intGt(step, 0) then "<" else ">"
-    let sign = if intGt(step, 0) then "+" else "-"
+    let start_ = daeExp(start, context, &preExp, &varDecls, &auxFunction)
+    let step_ = daeExp(step, context, &preExp, &varDecls, &auxFunction)
+    let stop_ = daeExp(stop, context, &preExp, &varDecls, &auxFunction)
     <<
-    for(int <%iter_%>=<%start%>; <%iter_%><%rel%><%start%><%sign%><%size%>; <%iter_%>+=<%step%>){
+    for(modelica_integer <%iter_%>=<%start_%>; in_range_integer(<%iter_%>, <%start_%>, <%stop_%>); <%iter_%>+=<%step_%>){
     >>
   case SIM_ITERATOR_LIST() then
     let iter_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+    let arr = (lst |> elem => '<%elem%>'; separator=", ")
     <<
+    static const int <%iter_%>_lst[<%size%>] = {<%arr%>};
     for(int <%iter_%>_=0; <%iter_%>_<<%size%>; <%iter_%>_++){
-      <%iter_%> = <%iter_%>_lst[<%iter_%>_];
+      modelica_integer <%iter_%> = <%iter_%>_lst[<%iter_%>_];
     >>
 end forIterator;
 
@@ -7559,8 +7663,11 @@ template forIteratorBody(SimIterator iter, Context context, Text &preExp, Text &
 ::= match iter
   case SIM_ITERATOR_RANGE() then
     let iter_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+    let start_ = daeExp(start, context, &preExp, &varDecls, &auxFunction)
+    let step_ = daeExp(step, context, &preExp, &varDecls, &auxFunction)
+    let size_ = daeExp(size, context, &preExp, &varDecls, &auxFunction)
     <<
-    (<%iter_%>-<%start%>)/<%step%>+<%size%>*(
+    (<%iter_%>-<%start_%>)/<%step_%>+<%size_%>*(
     >>
   case SIM_ITERATOR_LIST() then
     let iter_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
@@ -7569,13 +7676,37 @@ template forIteratorBody(SimIterator iter, Context context, Text &preExp, Text &
     >>
 end forIteratorBody;
 
+template forIteratorName(SimIterator iter, Context context, Text &preExp, Text &varDecls, Text &auxFunction, Text &sub)
+::= match iter
+  case SIM_ITERATOR_RANGE() then contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+  case SIM_ITERATOR_LIST() then contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+end forIteratorName;
+
+template subIterator(tuple<DAE.ComponentRef, array<DAE.Exp>> iter, String parent_iter, Context context, Text &preExp, Text &varDecls, Text &auxFunction, Text &sub)
+::= match iter
+  case (name, range) then
+    let name_ = contextCref(name, contextOther, &preExp, &varDecls, &auxFunction, &sub)
+    let range_ = (arrayList(range) |> elem => daeExp(elem, context, &preExp, &varDecls, &auxFunction); separator=", ")
+    let size_ = arrayLength(range)
+    <<
+    static const modelica_real <%name_%>_arr[<%size_%>] = {<%range_%>};
+    modelica_real <%name_%> = <%name_%>_arr[<%parent_iter%>-1];
+    >>
+end subIterator;
+
 template genericCallHeaders(list<SimGenericCall> genericCalls, Context context)
  "Generates the header for a set of generic calls."
 ::=
-  let jac = match context case JACOBIAN_CONTEXT() then ", ANALYTIC_JACOBIAN *jacobian" else ""
+  let jac = match context case JACOBIAN_CONTEXT() then ", JACOBIAN *jacobian" else ""
   (genericCalls |> call => match call
-    case SINGLE_GENERIC_CALL() then <<void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, int idx);>>
-    case IF_GENERIC_CALL() then <<void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, int idx);>>;
+    case SINGLE_GENERIC_CALL()
+    case IF_GENERIC_CALL() then
+      let &sub = buffer ""
+      let &preExp = buffer ""
+      let &varDecls = buffer ""
+      let &auxFunction = buffer ""
+      let idx_ = if resizable then (iters |> it => 'modelica_integer <%forIteratorName(it, context, &preExp, &varDecls, &auxFunction, &sub)%>';separator=", ";empty) else "int idx"
+      <<void genericCall_<%index%>(DATA *data, threadData_t *threadData<%jac%>, const int equationIndexes[2], <%idx_%>);>>;
   separator="\n\n")
 end genericCallHeaders;
 

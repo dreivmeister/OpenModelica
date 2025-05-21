@@ -395,6 +395,7 @@ function mkFullyQual
   input Absyn.Program absynProgram;
   input Absyn.Path classPath;
   input Absyn.Path pathToQualify;
+  input Boolean failOnError = false;
   output Absyn.Path qualPath = pathToQualify;
 protected
   InstNode top, expanded_cls, cls;
@@ -442,15 +443,19 @@ algorithm
     FlagsUtil.set(Flags.SCODE_INST, b);
     FlagsUtil.set(Flags.NF_SCALARIZE, s);
   else
-    // do not fail, just return the Absyn path
-    qualPath := pathToQualify;
-
     if not Flags.isSet(Flags.NF_API_NOISE) then
       ErrorExt.rollBack("NFApi.mkFullyQual");
     end if;
 
     FlagsUtil.set(Flags.SCODE_INST, b);
     FlagsUtil.set(Flags.NF_SCALARIZE, s);
+
+    if failOnError then
+      fail();
+    else
+      // do not fail, just return the Absyn path
+      qualPath := pathToQualify;
+    end if;
   end try;
 
   if Flags.isSet(Flags.EXEC_STAT) then
@@ -637,7 +642,7 @@ algorithm
     flat_model.variables := List.filterOnFalse(flat_model.variables, Variable.isEmptyArray);
   end if;
 
-  VerifyModel.verify(flat_model);
+  VerifyModel.verify(flat_model, InstNode.isPartial(inst_cls));
 
   // Convert the flat model to a DAE.
   (dae, daeFuncs) := ConvertDAE.convert(flat_model, funcs);
@@ -712,10 +717,15 @@ algorithm
   name := AbsynUtil.pathString(classPath);
 
   (program, top) := mkTop(absynProgram, name);
-  cls := Inst.lookupRootClass(classPath, top, FAST_CONTEXT);
 
-  // Expand the class.
-  expanded_cls := NFInst.expand(cls, FAST_CONTEXT);
+  if AbsynUtil.pathEqual(classPath, Absyn.IDENT("AllLoadedClasses")) then
+    expanded_cls := top;
+  else
+    cls := Inst.lookupRootClass(classPath, top, FAST_CONTEXT);
+
+    // Expand the class.
+    expanded_cls := NFInst.expand(cls, FAST_CONTEXT);
+  end if;
 
   if Flags.isSet(Flags.EXEC_STAT) then
     execStat("NFApi.frontEndLookup_dispatch("+ name +")");
@@ -1271,7 +1281,7 @@ algorithm
         json := dumpJSONSCodeMod(elem.modifications, scope, json);
         json := JSON.addPair("condition", JSON.makeBoolean(false), json);
         json := JSON.addPairNotNull("prefixes", dumpJSONAttributes(elem.attributes, elem.prefixes, scope), json);
-        json := dumpJSONCommentOpt(SOME(elem.comment), scope, json);
+        json := dumpJSONComment(elem.comment, scope, json);
       then
         ();
 
@@ -1282,7 +1292,7 @@ algorithm
         json := JSON.addPair("type", dumpJSONComponentType(cls, node, Component.getType(comp)), json);
         json := dumpJSONSCodeMod(elem.modifications, scope, json);
         json := JSON.addPairNotNull("prefixes", dumpJSONAttributes(elem.attributes, elem.prefixes, scope), json);
-        json := dumpJSONCommentOpt(SOME(elem.comment), scope, json);
+        json := dumpJSONComment(elem.comment, scope, json);
         json := JSON.addPair("$error", JSON.makeString(comp.errors), json);
       then
         ();
@@ -1311,7 +1321,7 @@ algorithm
         end if;
 
         json := JSON.addPairNotNull("prefixes", dumpJSONAttributes(elem.attributes, elem.prefixes, scope), json);
-        json := dumpJSONCommentOpt(comp.comment, scope, json);
+        json := dumpJSONComment(comp.comment, scope, json);
       then
         ();
 
@@ -1402,7 +1412,7 @@ function dumpJSONEnumTypeLiteral
 algorithm
   json := JSON.addPair("$kind", JSON.makeString("component"), json);
   json := JSON.addPair("name", JSON.makeString(InstNode.name(node)), json);
-  json := dumpJSONCommentOpt(Component.comment(InstNode.component(node)), scope, json);
+  json := dumpJSONComment(Component.comment(InstNode.component(node)), scope, json);
 end dumpJSONEnumTypeLiteral;
 
 function dumpJSONTypeName
@@ -1615,21 +1625,28 @@ function dumpJSONCommentOpt
   input Boolean dumpComment = true;
   input Boolean dumpAnnotation = true;
   input Boolean failOnError = false;
-protected
-  SCode.Comment cmt;
 algorithm
   if isSome(cmtOpt) then
-    SOME(cmt) := cmtOpt;
-
-    if isSome(cmt.comment) and dumpComment then
-      json := JSON.addPair("comment", JSON.makeString(Util.getOption(cmt.comment)), json);
-    end if;
-
-    if dumpAnnotation then
-      json := dumpJSONAnnotationOpt(cmt.annotation_, scope, {}, failOnError, json);
-    end if;
+    json := dumpJSONComment(Util.getOption(cmtOpt), scope, json, dumpComment, dumpAnnotation, failOnError);
   end if;
 end dumpJSONCommentOpt;
+
+function dumpJSONComment
+  input SCode.Comment cmt;
+  input InstNode scope;
+  input output JSON json;
+  input Boolean dumpComment = true;
+  input Boolean dumpAnnotation = true;
+  input Boolean failOnError = false;
+algorithm
+  if isSome(cmt.comment) and dumpComment then
+    json := JSON.addPair("comment", JSON.makeString(Util.getOption(cmt.comment)), json);
+  end if;
+
+  if dumpAnnotation then
+    json := dumpJSONAnnotationOpt(cmt.annotation_, scope, {}, failOnError, json);
+  end if;
+end dumpJSONComment;
 
 function dumpJSONCommentAnnotation
   input Option<SCode.Comment> cmtOpt;
@@ -1727,7 +1744,7 @@ algorithm
 
     case (_, SCode.Mod.NOMOD())
       algorithm
-        json := JSON.addPair(name, JSON.emptyObject(), json);
+        json := JSON.addPair(name, JSON.emptyListObject(), json);
       then
         ();
 
@@ -1745,6 +1762,11 @@ protected
   JSON j;
 algorithm
   json := match absynExp
+    case Absyn.Exp.INTEGER() then JSON.makeInteger(absynExp.value);
+    case Absyn.Exp.REAL() then JSON.makeNumber(stringReal(absynExp.value));
+    case Absyn.Exp.STRING() then JSON.makeString(absynExp.value);
+    case Absyn.Exp.BOOL() then JSON.makeBoolean(absynExp.value);
+
     // For non-literal arrays, dump each element separately to avoid
     // invalidating the whole array expression if any element contains invalid
     // expressions.
@@ -1753,7 +1775,7 @@ algorithm
       algorithm
         json := JSON.emptyArray(listLength(absynExp.arrayExp));
         for e in absynExp.arrayExp loop
-          j := dumpJSONAnnotationExp2(e, scope, info, failOnError);
+          j := dumpJSONAnnotationExp(e, scope, info, failOnError);
           json := JSON.addElement(j, json);
         end for;
       then
@@ -1844,7 +1866,7 @@ algorithm
       then
         json;
 
-    else JSON.makeString(Dump.printExpStr(AbsynUtil.stripCommentExpressions(exp)));
+    else JSON.makeString(Dump.printExpStr(AbsynUtil.stripCommentExpressions(exp, true)));
   end match;
 end dumpJSONAbsynExpression;
 
@@ -2133,7 +2155,7 @@ algorithm
         end if;
 
         if isSome(mod.binding) then
-          binding_json := JSON.makeString(Dump.printExpStr(AbsynUtil.stripCommentExpressions(Util.getOption(mod.binding))));
+          binding_json := JSON.makeString(Dump.printExpStr(AbsynUtil.stripCommentExpressions(Util.getOption(mod.binding), true)));
 
           if JSON.isNull(json) then
             json := binding_json;
@@ -2204,7 +2226,7 @@ algorithm
           json := JSON.addPair("condition", dumpJSONAbsynExpression(Util.getOption(element.condition)), json);
         end if;
 
-        json := dumpJSONCommentOpt(SOME(element.comment), scope, json);
+        json := dumpJSONComment(element.comment, scope, json);
       then
         json;
 
@@ -2232,7 +2254,7 @@ algorithm
           JSON.makeString(SCodeDump.restrictionStringPP(element.restriction)), json);
         json := JSON.addPairNotNull("prefixes", dumpJSONClassPrefixes(element, scope), json);
         json := dumpJSONSCodeClassDef(element.classDef, scope, isRedeclare, json);
-        json := dumpJSONCommentOpt(SOME(element.cmt), scope, json, dumpAnnotation = not isRedeclare);
+        json := dumpJSONComment(element.cmt, scope, json, dumpAnnotation = not isRedeclare);
 
         if isRedeclare then
           json := dumpJSONCommentAnnotation(SOME(element.cmt), scope, json,

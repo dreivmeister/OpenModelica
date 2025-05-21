@@ -38,7 +38,8 @@ SUBDIRS = Util \
   Expression \
   ModelInstance \
   Utilities \
-  StringHandler
+  StringHandler \
+  DynamicAnnotation
 
 BrowseMSL.depends = Util
 Diagram.depends = Util
@@ -48,3 +49,4 @@ Expression.depends = Util
 ModelInstance.depends = Util
 Utilities.depends = Util
 StringHandler.depends = Util
+DynamicAnnotation.depends = Util

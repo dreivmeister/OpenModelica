@@ -48,6 +48,7 @@ ForStatement8.mos \
 GetAllSubtypeOf1.mos \
 GetAllSubtypeOf2.mos \
 GetAllSubtypeOf3.mos \
+GetAllSubtypeOf4.mos \
 getClassComment.mos \
 getClassNames.mos \
 getCommandLineOptions.mos \
@@ -66,6 +67,7 @@ getInheritedClasses2.mos \
 getNthComponentAnnotation.mos \
 getNthConnector.mos \
 getNthConnectorIconAnnotation.mos \
+getNthImport.mos \
 getSimulationOptions1.mos \
 getSimulationOptions2.mos \
 getSimulationOptions3.mos \

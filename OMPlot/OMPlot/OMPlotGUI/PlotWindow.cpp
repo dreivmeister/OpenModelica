@@ -29,20 +29,27 @@
  *
  */
 
-#include <iostream>
 #include <memory>
-
 #include "PlotWindow.h"
+#include "OMPlot.h"
+#include "PlotZoomer.h"
+#include "util/read_csv.h"
+#include "util/read_matlab4.h"
+#include "PlotCurve.h"
+#include "PlotPicker.h"
+#include "Legend.h"
+#include "PlotPanner.h"
+#include "PlotGrid.h"
 #include "LogScaleEngine.h"
 #include "LinearScaleEngine.h"
+
 #include "qwt_plot_layout.h"
+#include "qwt_text.h"
 #if QWT_VERSION >= 0x060000
 #include "qwt_plot_renderer.h"
 #endif
-#include "qwt_scale_draw.h"
-#include "qwt_scale_widget.h"
 #include "qwt_text_label.h"
-#include "qwt_abstract_legend.h"
+#include "qwt_scale_widget.h"
 
 #include <QtSvg/QSvgGenerator>
 #include <QToolBar>
@@ -1420,6 +1427,11 @@ void PlotWindow::updatePlot()
   }
 }
 
+void PlotWindow::emitPrefixUnitsChanged()
+{
+  emit prefixUnitsChanged();
+}
+
 void PlotWindow::setInteractiveControls(bool enabled)
 {
   // control buttons
@@ -2201,7 +2213,7 @@ void SetupDialog::selectVariable(QString variable)
   }
 }
 
-void SetupDialog::setupPlotCurve(VariablePageWidget *pVariablePageWidget)
+void SetupDialog::setupPlotCurve(VariablePageWidget *pVariablePageWidget, bool prefixUnitsChanged)
 {
   if (pVariablePageWidget) {
     PlotCurve *pPlotCurve = pVariablePageWidget->getPlotCurve();
@@ -2231,7 +2243,7 @@ void SetupDialog::setupPlotCurve(VariablePageWidget *pVariablePageWidget)
     /* set the curve toggle sign */
     mpPlotWindow->toggleSign(pPlotCurve, pVariablePageWidget->getToggleSignCheckBox()->isChecked());
     // if prefixunits value is changed
-    if (mPrefixUnitsChanged) {
+    if (prefixUnitsChanged) {
       pPlotCurve->plotData();
     }
   }
@@ -2267,11 +2279,11 @@ void SetupDialog::saveSetup()
 void SetupDialog::applySetup()
 {
   // set the prefix units. Always set prefixUnits before setting plot data.
-  mPrefixUnitsChanged = mpPrefixUnitsCheckbox->isChecked() != mpPlotWindow->getPrefixUnits();
+  const bool prefixUnitsChanged = mpPrefixUnitsCheckbox->isChecked() != mpPlotWindow->getPrefixUnits();
   mpPlotWindow->setPrefixUnits(mpPrefixUnitsCheckbox->isChecked());
   // set the variables attributes
   for (int i = 0 ; i < mpVariablePagesStackedWidget->count() ; i++) {
-    setupPlotCurve(qobject_cast<VariablePageWidget*>(mpVariablePagesStackedWidget->widget(i)));
+    setupPlotCurve(qobject_cast<VariablePageWidget*>(mpVariablePagesStackedWidget->widget(i)), prefixUnitsChanged);
   }
   // set the font sizes. Don't move this line. We should set the font sizes before calling setLegendPosition
   mpPlotWindow->getPlot()->setFontSizes(mpTitleFontSizeSpinBox->value(), mpVerticalAxisTitleFontSizeSpinBox->value(), mpVerticalAxisNumbersFontSizeSpinBox->value(),
@@ -2296,4 +2308,7 @@ void SetupDialog::applySetup()
   }
   // update plot
   mpPlotWindow->updatePlot();
+  if (prefixUnitsChanged) {
+    mpPlotWindow->emitPrefixUnitsChanged();
+  }
 }

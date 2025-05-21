@@ -59,12 +59,15 @@ public
   import Statement = NFStatement;
   import Subscript = NFSubscript;
   import Type = NFType;
+  import Typing = NFTyping;
   import Variable = NFVariable;
 
   // Old Backend imports
   import OldBackendDAE = BackendDAE;
 
   // New Backend imports
+  import DetectStates = NBDetectStates;
+  import NBResizable.EvalOrder;
   import Evaluation = NBEvaluation;
   import Inline = NBInline;
   import Replacements = NBReplacements;
@@ -199,7 +202,7 @@ public
       list<Option<Iterator>> tmp_maps, maps = {};
     algorithm
       if List.hasOneElement(iterators) then
-        result := List.first(iterators);
+        result := listHead(iterators);
       else
         for iter in listReverse(iterators) loop
           (tmp_names, tmp_ranges, tmp_maps) := getFrames(iter);
@@ -410,6 +413,35 @@ public
       output list<Dimension> dims = List.flatten(list(Type.arrayDims(t) for t in types(iter)));
     end dimensions;
 
+    function dummy
+      "creates a dummy iterator as a replacement for the actual correct one
+      Used for solving the body to only evaluate a single frame location instead of all."
+      input output Iterator iter;
+    protected
+      list<ComponentRef> names;
+      list<Expression> ranges;
+      list<Option<Iterator>> maps;
+      function dummyRange
+        "artificially set the range to only its first element"
+        input output Expression exp;
+      algorithm
+        exp := match exp
+          case Expression.RANGE() then Expression.makeRange(exp.start, NONE(), exp.start);
+          case Expression.ARRAY() algorithm
+          then if arrayLength(exp.elements) > 0 then Expression.makeArray(
+              ty      = Type.ARRAY(Type.INTEGER(), {Dimension.fromInteger(1)}),
+              expl    = arrayCreate(1, exp.elements[1]),
+              literal = Expression.isLiteral(exp.elements[1]))
+            else exp;
+          else exp;
+        end match;
+      end dummyRange;
+    algorithm
+      (names, ranges, maps) := getFrames(iter);
+      ranges := list(dummyRange(e) for e in ranges);
+      iter := fromFrames(List.zip3(names, ranges, maps));
+    end dummy;
+
     function createLocationReplacements
       "adds replacements rules for a single frame location
       Note: does not take body sizes > 1 into account"
@@ -539,11 +571,13 @@ public
       also replaces all array constructors with indexed expressions."
       output Iterator iter;
       input output Expression exp;
+      input UnorderedSet<VariablePointer> new_iters;
     protected
       UnorderedMap<ComponentRef, Expression> replacements = UnorderedMap.new<Expression>(ComponentRef.hash, ComponentRef.isEqual);
     algorithm
-      (exp, iter) := extractFromCall(exp, EMPTY(), replacements);
+      (exp, iter) := extractFromCall(exp, EMPTY(), replacements, new_iters);
       exp := Expression.map(exp, function Replacements.applySimpleExp(replacements = replacements));
+      exp := Typing.typeExp(exp, NFInstContext.RHS, sourceInfo(), true);
     end extract;
 
     function extractFromCall
@@ -551,6 +585,7 @@ public
       input output Expression exp;
       input output Iterator iter;
       input UnorderedMap<ComponentRef, Expression> replacements   "replacement rules";
+      input UnorderedSet<VariablePointer> new_iters;
     algorithm
       (exp, iter) := match exp
         local
@@ -562,8 +597,7 @@ public
 
         case Expression.CALL(call = call as Call.TYPED_ARRAY_CONSTRUCTOR()) algorithm
           for tpl in listReverse(call.iters) loop
-            (node, range) := tpl;
-            frames := (ComponentRef.fromNode(node, Type.INTEGER(), {}, NFComponentRef.Origin.ITERATOR), range, NONE()) :: frames;
+            frames := Inline.inlineArrayIterator(tpl, new_iters) :: frames;
           end for;
           tmp := fromFrames(frames);
           if not isEmpty(iter) then
@@ -577,7 +611,7 @@ public
         case Expression.CALL() then (exp, iter);
 
         else algorithm
-          (exp, iter) := Expression.mapFoldShallow(exp, function extractFromCall(replacements = replacements), iter);
+          (exp, iter) := Expression.mapFoldShallow(exp, function extractFromCall(replacements = replacements, new_iters = new_iters), iter);
         then (exp, iter);
       end match;
     end extractFromCall;
@@ -603,7 +637,6 @@ public
       output Subscript sub;
     protected
       Expression step, sub_exp;
-      Type ty = Type.REAL();
     algorithm
       sub := match range
 
@@ -611,20 +644,32 @@ public
         case Expression.RANGE() algorithm
           step := Util.getOptionOrDefault(range.step, Expression.INTEGER(1));
           sub_exp := Expression.fromCref(iter_name);
-          // if start and step are equal to 1, make simple expression (simplify is not strong enough yet)
-          if not (Expression.isOne(range.start) and Expression.isOne(step)) then
+          // i - start
+          if not Expression.isOne(range.start) then
             sub_exp := Expression.MULTARY(
-              arguments = {Expression.MULTARY(
-                arguments = {Expression.MULTARY(
-                  arguments = {sub_exp},
-                  inv_arguments = {range.start},
-                  operator = Operator.makeAdd(ty))},
-                inv_arguments = {step},
-                operator = Operator.makeMul(ty)),
-              Expression.INTEGER(1)},
-            inv_arguments = {},
-            operator = Operator.makeAdd(ty));
-            sub_exp := SimplifyExp.simplifyDump(sub_exp, true, getInstanceName());
+              arguments = {sub_exp},
+              inv_arguments = {range.start},
+              operator = Operator.makeAdd(Type.INTEGER()));
+          end if;
+
+          // (...)/step
+          if not Expression.isOne(step) then
+            sub_exp := Expression.MULTARY(
+              arguments = {sub_exp},
+              inv_arguments = {step},
+              operator = Operator.makeMul(Type.REAL()));
+          end if;
+
+          // (...) + 1
+          if not Expression.isOne(range.start) then
+            sub_exp := Expression.MULTARY(
+              arguments = {sub_exp, Expression.INTEGER(1)},
+              inv_arguments = {},
+              operator = Operator.makeAdd(Expression.typeOf(sub_exp)));
+          end if;
+
+          sub_exp := SimplifyExp.simplifyDump(sub_exp, true, getInstanceName());
+          if not Type.isInteger(Expression.typeOf(sub_exp)) then
             sub_exp := Expression.CALL(Call.makeTypedCall(NFBuiltinFuncs.INTEGER_REAL, {sub_exp}, Variability.DISCRETE, Purity.PURE));
           end if;
         then Subscript.INDEX(sub_exp);
@@ -635,6 +680,256 @@ public
         then fail();
       end match;
     end normalizedSubscript;
+
+    function simplifyRangeCondition
+      "used for nested for/if equation. e.g:
+      for i in 1:10 loop
+        if i <> 6 then // (no else case)
+          [...]
+      has to be simplified to
+      for i in {1,2,3,4,5,7,8,9,10} loop
+        [...]"
+      input output Iterator iter;
+      input Expression condition;
+      output Solve.Status status;
+    protected
+      type IterOpt = Option<Iterator>; // needed for the map
+      list<ComponentRef> names;
+      list<Expression> ranges;
+      list<Option<Iterator>> maps;
+      UnorderedMap<ComponentRef, Expression> iter_map = UnorderedMap.new<Expression>(ComponentRef.hash, ComponentRef.isEqual);
+      UnorderedMap<ComponentRef, IterOpt> opt_map = UnorderedMap.new<IterOpt>(ComponentRef.hash, ComponentRef.isEqual);
+    algorithm
+      (iter, status) := match condition
+        local
+          Equation tmpEqn;
+          list<ComponentRef> occs;
+          ComponentRef cref;
+          Solve.RelationInversion invert;
+          Expression range;
+          Operator operator;
+
+        case Expression.RELATION() algorithm
+          // prepare the mappings
+          (names, ranges, maps) := getFrames(iter);
+          for frame in List.zip3(names, ranges, maps) loop
+            UnorderedMap.add(Util.tuple31(frame), Util.tuple32(frame), iter_map);
+            UnorderedMap.add(Util.tuple31(frame), Util.tuple33(frame), opt_map);
+          end for;
+
+          // create temp equation and collect all occuring iterator crefs
+          tmpEqn  := Pointer.access(Equation.makeAssignment(condition.exp1, condition.exp2, Pointer.create(0), NBVariable.TEMPORARY_STR, Iterator.EMPTY(), EquationAttributes.default(EquationKind.UNKNOWN, false)));
+          occs    := Equation.collectCrefs(tmpEqn, function Equation.collectFromMap(check_map = iter_map));
+
+
+          if listLength(occs) == 1 then
+            // get the only occuring iterator cref and solve the body for it
+            cref := listHead(occs);
+            (tmpEqn, _, status, invert) := Solve.solveBody(tmpEqn, cref, FunctionTree.EMPTY());
+            operator := if invert == NBSolve.RelationInversion.TRUE then Operator.invert(condition.operator) else condition.operator;
+
+            // if its solvable, get the corresponding iterator range and adapt it with the information of the if-condition
+            if status == NBSolve.Status.EXPLICIT and invert <> NBSolve.RelationInversion.UNKNOWN then
+              range := UnorderedMap.getSafe(cref, iter_map, sourceInfo());
+              try
+                (range, status) := match range
+                  case Expression.RANGE() then (adaptRange(UnorderedMap.getSafe(cref, iter_map, sourceInfo()), Equation.getRHS(tmpEqn), operator), status);
+
+                  // ToDo: intercepting this
+                  case Expression.ARRAY() then (adaptArray(UnorderedMap.getSafe(cref, iter_map, sourceInfo()), Equation.getRHS(tmpEqn), operator), status);
+
+                  // can't do anything here
+                  else (range, NBSolve.Status.UNSOLVABLE);
+                end match;
+              else
+                Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed to combine iterator: " + toString(iter) + " with condition " + Expression.toString(condition) + "."});
+                fail();
+              end try;
+
+              UnorderedMap.add(cref, range, iter_map);
+            else
+              status := NBSolve.Status.UNSOLVABLE;
+            end if;
+          end if;
+
+          // if something changed, create a new iterator
+          if status == NBSolve.Status.EXPLICIT then
+            iter := Iterator.fromFrames(list((name, UnorderedMap.getSafe(name, iter_map, sourceInfo()), UnorderedMap.getSafe(name, opt_map, sourceInfo())) for name in names));
+          end if;
+        then (iter, status);
+
+        else (iter, NBSolve.Status.UNSOLVABLE);
+      end match;
+    end simplifyRangeCondition;
+
+    function adaptRange
+      input output Expression range;
+      input Expression rhs;
+      input Operator operator;
+    protected
+      Integer thresh, start, step, stop;
+      Boolean within_range;
+    algorithm
+      // extract the primitive type representation
+      (thresh, start, step, stop) := match (rhs, range)
+        case (Expression.INTEGER(thresh), range as Expression.RANGE(start = Expression.INTEGER(start), step = SOME(Expression.INTEGER(step)), stop = Expression.INTEGER(stop))) then (thresh, start, step, stop);
+        case (Expression.INTEGER(thresh), range as Expression.RANGE(start = Expression.INTEGER(start), stop = Expression.INTEGER(stop))) then (thresh, start, 1, stop);
+        else algorithm
+          Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because range could not be evaluated: " + Expression.toString(range)});
+        then fail();
+      end match;
+
+      within_range := thresh * sign(step) > start * sign(step) and thresh * sign(step) < stop * sign(step);
+
+      range := match operator.op
+        // i == VAL as a condition
+        case NFOperator.Op.EQUAL then
+          // remove all but this element from the range
+          if within_range then Expression.makeRange(Expression.INTEGER(thresh), NONE(), Expression.INTEGER(thresh))
+          // this element is not in the range >>> no valid element
+          else Expression.makeRange(Expression.INTEGER(0), SOME(Expression.INTEGER(0)), Expression.INTEGER(0));
+
+        // i <> VAL as a condition
+        case NFOperator.Op.NEQUAL then
+          // remove only this element from the range
+          if within_range then Expression.makeExpArray(listArray(list(Expression.INTEGER(i) for i guard(i <> thresh) in List.intRange3(start, step, stop))), Type.INTEGER(), true)
+          // this element is not in the range >>> original range not changed
+          else range;
+
+        // i <, <=, >, >=  VAL as a condition
+        case NFOperator.Op.LESS       then interceptRange(thresh - 1, start, step, stop, within_range, sign(step) > 0, range, intLe);
+        case NFOperator.Op.LESSEQ     then interceptRange(thresh, start, step, stop, within_range, sign(step) > 0, range, intLt);
+        case NFOperator.Op.GREATER    then interceptRange(thresh + 1, start, step, stop, within_range, sign(step) < 0, range, intGe);
+        case NFOperator.Op.GREATEREQ  then interceptRange(thresh, start, step, stop, within_range, sign(step) < 0, range, intGt);
+
+        else algorithm
+          Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for operator: " + Operator.toDebugString(operator)});
+        then fail();
+      end match;
+    end adaptRange;
+
+    function interceptRange
+      input Integer thresh, start, step, stop;
+      input Boolean within_range, at_end;
+      input output Expression range;
+      input intComp func;
+    protected
+      partial function intComp
+        input Integer i1, i2;
+        output Boolean b;
+      end intComp;
+
+      function lowerBoundary
+        input Integer thresh, start, step;
+        output Integer boundary = thresh + mod(start - thresh, step);
+      end lowerBoundary;
+    algorithm
+      if within_range then
+        // the threshold is within the range, intercept it
+        if at_end then
+          // interception at the end does not have to be truncated to the fitting part
+          range := Expression.makeRange(Expression.INTEGER(start), SOME(Expression.INTEGER(step)), Expression.INTEGER(thresh));
+        else
+          // interception at the start has to compute the correct lower boundary
+          range := Expression.makeRange(Expression.INTEGER(lowerBoundary(thresh, start, step)), SOME(Expression.INTEGER(step)), Expression.INTEGER(stop));
+        end if;
+      elseif func(if at_end then stop else start, thresh) then
+        // the threshold leads to an empty range, otherwise leave it as it was
+        range := Expression.makeRange(Expression.INTEGER(0), SOME(Expression.INTEGER(0)), Expression.INTEGER(0));
+      end if;
+    end interceptRange;
+
+    function adaptArray
+      input output Expression array;
+      input Expression rhs;
+      input Operator operator;
+    protected
+      Integer thresh;
+      list<Integer> elems;
+    algorithm
+      // extract the primitive type representation
+      (thresh, elems) := match (rhs, array)
+        case (Expression.INTEGER(thresh), Expression.ARRAY(literal = true)) then (thresh, list(Expression.integerValue(e) for e in array.elements));
+        else algorithm
+          Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because array range is non literal: " + Expression.toString(array)});
+        then fail();
+      end match;
+
+      array := match operator.op
+        // i == VAL as a condition
+        case NFOperator.Op.EQUAL then
+          // remove all but this element from the array
+          if List.contains(elems, thresh, intEq) then Expression.makeRange(Expression.INTEGER(thresh), NONE(), Expression.INTEGER(thresh))
+          // this element is not in the range >>> no valid element
+          else Expression.makeRange(Expression.INTEGER(0), SOME(Expression.INTEGER(0)), Expression.INTEGER(0));
+
+        // i <>, <, <=, >, >=  VAL as a condition
+        case NFOperator.Op.NEQUAL     then Expression.makeExpArray(listArray(list(Expression.INTEGER(i) for i guard(i <> thresh) in elems)), Type.INTEGER(), true);
+        case NFOperator.Op.LESS       then Expression.makeExpArray(listArray(list(Expression.INTEGER(i) for i guard(i < thresh) in elems)), Type.INTEGER(), true);
+        case NFOperator.Op.LESSEQ     then Expression.makeExpArray(listArray(list(Expression.INTEGER(i) for i guard(i <= thresh) in elems)), Type.INTEGER(), true);
+        case NFOperator.Op.GREATER    then Expression.makeExpArray(listArray(list(Expression.INTEGER(i) for i guard(i > thresh) in elems)), Type.INTEGER(), true);
+        case NFOperator.Op.GREATEREQ  then Expression.makeExpArray(listArray(list(Expression.INTEGER(i) for i guard(i >= thresh) in elems)), Type.INTEGER(), true);
+
+        else algorithm
+          Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for operator: " + Operator.toDebugString(operator)});
+        then fail();
+      end match;
+    end adaptArray;
+
+    function applyOrder
+      input output Iterator iter;
+      input UnorderedMap<ComponentRef, EvalOrder> order;
+      function applySingleOrder
+        input ComponentRef name;
+        input output Expression range;
+        input UnorderedMap<ComponentRef, EvalOrder> order;
+      protected
+        EvalOrder eo = UnorderedMap.getOrDefault(name, order, NBResizable.EvalOrder.INDEPENDENT);
+        Expression step, res;
+        list<Integer> elements;
+      algorithm
+        range := match range
+
+            // revert a range if needed
+            case Expression.RANGE() algorithm
+              step := Util.getOptionOrDefault(range.step, Expression.INTEGER(1));
+              if (Expression.isNegative(step) and eo == NBResizable.EvalOrder.FORWARD) or (Expression.isPositive(step) and eo == NBResizable.EvalOrder.BACKWARD) then
+                res := Expression.revertRange(range);
+              else
+                res := range;
+              end if;
+            then res;
+
+            // revert an array/list if needed
+            case Expression.ARRAY(literal = true) algorithm
+              if eo == NBResizable.EvalOrder.FORWARD then
+                elements := list(Expression.getInteger(e) for e in range.elements);
+                range.elements := listArray(list(Expression.INTEGER(e) for e in List.sort(elements, intGt)));
+              elseif eo == NBResizable.EvalOrder.BACKWARD then
+                elements := list(Expression.getInteger(e) for e in range.elements);
+                range.elements := listArray(list(Expression.INTEGER(e) for e in List.sort(elements, intLt)));
+              end if;
+            then range;
+
+            // no other allowed
+            else algorithm
+              Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for unhandled range expression: " + Expression.toString(range)});
+            then fail();
+          end match;
+      end applySingleOrder;
+    algorithm
+      iter := match iter
+        case SINGLE() algorithm
+          iter.range := applySingleOrder(iter.name, iter.range, order);
+        then iter;
+        case NESTED() algorithm
+          for i in 1:arrayLength(iter.names) loop
+            iter.ranges[i] := applySingleOrder(iter.names[i], iter.ranges[i], order);
+          end for;
+        then iter;
+        else iter;
+      end match;
+    end applyOrder;
 
     function toString
       input Iterator iter;
@@ -650,7 +945,7 @@ public
       algorithm
         if Util.isSome(map) then
           (names, _) := getFrames(Util.getOption(map));
-          str := str + " (" + ComponentRef.toString(List.first(names)) + ")";
+          str := str + " (" + ComponentRef.toString(listHead(names)) + ")";
         end if;
       end singleStr;
     algorithm
@@ -1264,7 +1559,7 @@ public
           if not referenceEq(iter, eq.iter) then
             eq.iter := iter;
           end if;
-          eq.body := list(map(body_eqn, funcExp, funcCrefOpt) for body_eqn in eq.body);
+          eq.body := list(map(body_eqn, funcExp, funcCrefOpt, mapFunc) for body_eqn in eq.body);
         then eq;
 
         case WHEN_EQUATION() algorithm
@@ -1307,6 +1602,22 @@ public
       cref_lst := UnorderedSet.toList(acc);
     end collectCrefs;
 
+    function collectFromSet extends Slice.filterCref;
+      input UnorderedSet<ComponentRef> check_set;
+    algorithm
+      if UnorderedSet.contains(cref, check_set) then
+        UnorderedSet.add(cref, acc);
+      end if;
+    end collectFromSet;
+
+    function collectFromMap<T> extends Slice.filterCref;
+      input UnorderedMap<ComponentRef, T> check_map;
+    algorithm
+      if UnorderedMap.contains(cref, check_map) then
+        UnorderedSet.add(cref, acc);
+      end if;
+    end collectFromMap;
+
     function getLHS
       "gets the left hand side expression of an equation."
       input Equation eq;
@@ -1318,7 +1629,7 @@ public
         case SCALAR_EQUATION()        then eq.lhs;
         case ARRAY_EQUATION()         then eq.lhs;
         case RECORD_EQUATION()        then eq.lhs;
-        case FOR_EQUATION(body = {_}) then getLHS(List.first(eq.body));
+        case FOR_EQUATION(body = {_}) then getLHS(listHead(eq.body));
         case IF_EQUATION()            algorithm
           (lhs, success) := IfEquationBody.getLHS(eq.body);
           if not success then
@@ -1341,7 +1652,7 @@ public
         case SCALAR_EQUATION()        then eq.rhs;
         case ARRAY_EQUATION()         then eq.rhs;
         case RECORD_EQUATION()        then eq.rhs;
-        case FOR_EQUATION(body = {_}) then getRHS(List.first(eq.body));
+        case FOR_EQUATION(body = {_}) then getRHS(listHead(eq.body));
         case IF_EQUATION()            then IfEquationBody.getRHS(eq.body);
         else algorithm
           Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because RHS was ambiguous for: " + toString(eq)});
@@ -1359,7 +1670,7 @@ public
         case ARRAY_EQUATION()   algorithm eq.lhs := lhs; then eq;
         case RECORD_EQUATION()  algorithm eq.lhs := lhs; then eq;
         case FOR_EQUATION(body = {_}) algorithm
-          eq.body := {setLHS(List.first(eq.body), lhs)};
+          eq.body := {setLHS(listHead(eq.body), lhs)};
         then eq;
         else algorithm
           Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because LHS " + Expression.toString(lhs) + " could not be set for:\n " + toString(eq)});
@@ -1377,7 +1688,7 @@ public
         case ARRAY_EQUATION()   algorithm eq.rhs := rhs; then eq;
         case RECORD_EQUATION()  algorithm eq.rhs := rhs; then eq;
         case FOR_EQUATION(body = {_}) algorithm
-          eq.body := {setRHS(List.first(eq.body), rhs)};
+          eq.body := {setRHS(listHead(eq.body), rhs)};
         then eq;
         else algorithm
           Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because RHS could not be set for: " + toString(eq)});
@@ -1441,6 +1752,8 @@ public
       input output Equation eq;
       input String name = "";
       input String indent = "";
+      input Pointer<list<Pointer<Variable>>> acc_discrete_states = Pointer.create({});
+      input Pointer<list<Pointer<Variable>>> acc_previous = Pointer.create({});
       input SimplifyFunc simplifyExp = function SimplifyExp.simplifyDump(includeScope = true, name = name, indent = indent);
 
       partial function SimplifyFunc
@@ -1466,6 +1779,10 @@ public
       eq := match eq
         local
           Equation new_eq;
+          WhenEquationBody when_body;
+          IfEquationBody if_body;
+          Iterator iter;
+          Solve.Status status;
 
         case SCALAR_EQUATION() algorithm
           if Expression.isEqual(eq.lhs, eq.rhs) then
@@ -1494,28 +1811,26 @@ public
 
         case WHEN_EQUATION() algorithm
           new_eq := match WhenEquationBody.simplify(SOME(eq.body))
-            local
-              WhenEquationBody body;
-            case SOME(body) algorithm
-              eq.body := body;
+            case SOME(when_body) algorithm
+              eq.body := when_body;
             then eq;
-            else Equation.DUMMY_EQUATION();
+            else algorithm
+              DetectStates.findDiscreteStatesFromWhenBody(eq.body, acc_discrete_states, acc_previous);
+            then Equation.DUMMY_EQUATION();
           end match;
         then new_eq;
 
         case IF_EQUATION() algorithm
           new_eq := match IfEquationBody.simplify(SOME(eq.body))
-            local
-              IfEquationBody body;
-            case SOME(body) algorithm
-              if isNone(body.else_if) and not List.hasSeveralElements(body.then_eqns) then
+            case SOME(if_body) algorithm
+              if isNone(if_body.else_if) and not List.hasSeveralElements(if_body.then_eqns) then
                 // first if-branch is true and has only one equation
                 // just replace if-equation with body
-                new_eq := Pointer.access(List.first(body.then_eqns));
+                new_eq := Pointer.access(listHead(if_body.then_eqns));
               else
-                eq.body := body;
+                eq.body := if_body;
                 try
-                  new_eq := IfEquationBody.inline(body, eq);
+                  new_eq := IfEquationBody.inline(if_body, eq);
                 else
                   new_eq := eq;
                 end try;
@@ -1525,10 +1840,19 @@ public
           end match;
         then new_eq;
 
-        // ToDo: implement the following correctly:
+        // for equation with a single if-body without else-if.
+        // structurally ambiguous of size, the if-condition and the for-loop have to be combined
+        case FOR_EQUATION(body = {IF_EQUATION(body = if_body as IfEquationBody.IF_EQUATION_BODY(else_if = NONE()))}) algorithm
+          (iter, status) := Iterator.simplifyRangeCondition(eq.iter, if_body.condition);
+          if status == NBSolve.Status.EXPLICIT then
+            eq.iter := iter;
+            eq.body := list(Pointer.access(be) for be in if_body.then_eqns);
+            eq.size := Equation.size(Pointer.create(eq), true);
+          end if;
+        then Inline.inlineForEquation(eq);
 
-        case FOR_EQUATION()     then eq;
-        case AUX_EQUATION()     then eq;
+        case FOR_EQUATION() then Inline.inlineForEquation(eq);
+        case AUX_EQUATION() then eq;
         else algorithm
           Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " failed for: " + toString(eq)});
         then fail();
@@ -1743,7 +2067,7 @@ public
 
         // returns innermost residual!
         // Ambiguous for entwined for loops!
-        case FOR_EQUATION(body = {_}) then getResidualExp(List.first(eqn.body));
+        case FOR_EQUATION(body = {_}) then getResidualExp(listHead(eqn.body));
 
         else algorithm
           Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for:\n" + toString(eqn)});
@@ -1762,7 +2086,7 @@ public
         case ARRAY_EQUATION()   then eq.ty;
         case RECORD_EQUATION()  then eq.ty;
         case FOR_EQUATION()     algorithm
-          ty := getType(List.first(eq.body));
+          ty := getType(listHead(eq.body));
           if not skipIterator then
             ty := Type.liftArrayRightList(ty, Iterator.dimensions(eq.iter));
           end if;
@@ -1800,6 +2124,18 @@ public
         else {};
       end match;
     end getForFrames;
+
+    function applyForOrder
+      input output Equation eqn;
+      input UnorderedMap<ComponentRef, EvalOrder> order;
+    algorithm
+      eqn := match eqn
+        case FOR_EQUATION() algorithm
+          eqn.iter := Iterator.applyOrder(eqn.iter, order);
+        then eqn;
+        else eqn;
+      end match;
+    end applyForOrder;
 
     function isDummy
       input Equation eqn;
@@ -1962,6 +2298,7 @@ public
       input Pointer<Variable> var_ptr;
       input Pointer<Integer> idx;
       input Boolean initial_;
+      input UnorderedSet<VariablePointer> new_iters;
       output Pointer<Equation> eqn;
     protected
       String context = "BND";
@@ -1969,7 +2306,6 @@ public
       Expression lhs, rhs;
       EquationAttributes eqnAttr;
       Iterator iter;
-      list<ComponentRef> sub_crefs;
       list<Subscript> subs;
     algorithm
       var := Pointer.access(var_ptr);
@@ -1997,7 +2333,7 @@ public
       end if;
 
       // simplify rhs and get potential iterators
-      (iter, rhs) := Iterator.extract(rhs);
+      (iter, rhs) := Iterator.extract(rhs, new_iters);
       rhs := SimplifyExp.simplifyDump(rhs, true, getInstanceName());
 
       if Iterator.isEmpty(iter) then
@@ -2005,8 +2341,7 @@ public
         eqn := makeAssignment(lhs, rhs, idx, context, Iterator.EMPTY(), eqnAttr);
       else
         rhs := Expression.map(rhs, Expression.repairOperator);
-        (sub_crefs, _) := Iterator.getFrames(iter);
-        subs := list(Subscript.fromTypedExp(Expression.fromCref(cref)) for cref in sub_crefs);
+        subs := Iterator.normalizedSubscripts(iter);
         lhs := Expression.fromCref(ComponentRef.mergeSubscripts(subs, var.name, true, true));
         eqn := makeAssignment(lhs, rhs, idx, context, iter, eqnAttr);
         // this could lead to non existing variables, should not be a problem though
@@ -2024,7 +2359,7 @@ public
         local
           Equation body;
         case FOR_EQUATION() algorithm
-          (body, acc) := mergeIterators(List.first(eq.body), false);
+          (body, acc) := mergeIterators(listHead(eq.body), false);
           acc := eq.iter :: acc;
         then (if top_level then FOR_EQUATION(eq.size, Iterator.merge(acc), {body}, eq.source, eq.attr) else body, acc);
         else (eq, {});
@@ -2042,7 +2377,7 @@ public
         case FOR_EQUATION() algorithm
           // split returns innermost first
           iterators := Iterator.split(eqn.iter);
-          body := List.first(eqn.body);
+          body := listHead(eqn.body);
           for iter in iterators loop
             body := FOR_EQUATION(eqn.size, iter, {body}, eqn.source, eqn.attr);
           end for;
@@ -2142,130 +2477,117 @@ public
     function slice
       "performs a single slice based on the given indices and the cref to solve for
       does not work for entwined for loops!"
-      input output Pointer<Equation> eqn_ptr  "equation to slice";
+      input Pointer<Equation> eqn_ptr         "equation to slice";
       input list<Integer> indices             "zero based indices of the eqn";
-      input Option<ComponentRef> cref_opt     "optional cref to solve for, if none is given, the body stays as it is";
+      output list<Pointer<Equation>> sliced_eqn;
       output SlicingStatus slicing_status     "unchanged, trivial (only rearranged) or nontrivial";
-      output Solve.Status solve_status        "unprocessed, explicit, implicit, unsolvable";
-      input output FunctionTree funcTree      "function tree for solving";
     protected
       Equation eqn;
-      list<Frame> frames;
       list<Dimension> dims;
       list<Integer> sizes;
-      list<Integer> first_location, last_location, frame_comp;
-      list<list<Integer>> locations;
-      list<array<Integer>> locations_T;
-      list<FrameLocation> frame_locations;
-      list<tuple<Integer, Integer, Integer>> ranges;
-      FrameOrderingStatus frame_status;
     algorithm
       eqn := Pointer.access(eqn_ptr);
-      (eqn_ptr, slicing_status, solve_status) := match eqn
+      (sliced_eqn, slicing_status) := match eqn
         local
-          list<Equation> body_lst;
-          Equation body, sliced;
-          Option<UnorderedMap<ComponentRef, Expression>> removed_diagonals_opt;
-          UnorderedMap<ComponentRef, Expression> replacements, removed_diagonals;
-          list<tuple<ComponentRef, Expression>> removed_diagonals_linear_maps;
-          Expression condition;
-          Integer size;
-          Iterator iter;
 
         // empty index list indicates no slicing and no rearranging
-        case _ guard(listEmpty(indices)) then (Pointer.create(eqn), SlicingStatus.UNCHANGED, NBSolve.Status.EXPLICIT);
+        case _ guard(listEmpty(indices)) then ({Pointer.create(eqn)}, SlicingStatus.UNCHANGED);
 
         case RECORD_EQUATION() algorithm
           slicing_status := if Equation.size(eqn_ptr) == listLength(indices) then SlicingStatus.TRIVIAL else SlicingStatus.NONTRIVIAL;
-          if Util.isSome(cref_opt) then
-            (eqn, funcTree, solve_status, _) := Solve.solveBody(Pointer.access(eqn_ptr), Util.getOption(cref_opt), funcTree);
-          else
-            solve_status := NBSolve.Status.EXPLICIT;
-          end if;
-        then (Pointer.create(eqn), slicing_status, solve_status);
+        then ({Pointer.create(eqn)}, slicing_status);
 
         case ARRAY_EQUATION() algorithm
           slicing_status := if Equation.size(eqn_ptr) == listLength(indices) then SlicingStatus.TRIVIAL else SlicingStatus.NONTRIVIAL;
-          if Util.isSome(cref_opt) then
-            (eqn, funcTree, solve_status, _) := Solve.solveBody(Pointer.access(eqn_ptr), Util.getOption(cref_opt), funcTree);
-          else
-            solve_status := NBSolve.Status.EXPLICIT;
-          end if;
-        then (Pointer.create(eqn), slicing_status, solve_status);
+        then ({Pointer.create(eqn)}, slicing_status);
 
         case FOR_EQUATION() algorithm
-          // get the sizes of the 'return value' of the equation
-          dims      := Type.arrayDims(getType(eqn));
-          sizes     := list(Dimension.size(dim) for dim in dims);
-
           // trivial slices replace the original equation entirely
-          slicing_status := if Equation.size(eqn_ptr) == listLength(indices) then SlicingStatus.TRIVIAL else SlicingStatus.NONTRIVIAL;
-
-          // kabdelhak: ToDo: check ordering of locations and sizes
-          locations                                       := list(Slice.indexToLocation(idx, sizes) for idx in indices);
-          locations_T                                     := Slice.transposeLocations(locations, listLength(sizes));
-          frames                                          := listReverse(getForFrames(eqn));
-          frame_locations                                 := List.zip(locations_T, frames);
-          (frame_locations, replacements, frame_status)   := Slice.orderTransposedFrameLocations(frame_locations);
-          if frame_status == FrameOrderingStatus.FAILURE then
-            slicing_status  := SlicingStatus.FAILURE;
-            solve_status    := NBSolve.Status.UNPROCESSED;
-            return;
+          dims            := Type.arrayDims(getType(eqn));
+          sizes           := list(Dimension.size(dim) for dim in dims);
+          slicing_status  := if Equation.size(eqn_ptr) == listLength(indices) then SlicingStatus.TRIVIAL else SlicingStatus.NONTRIVIAL;
+          if slicing_status == SlicingStatus.NONTRIVIAL then
+            sliced_eqn := sliceFor(listHead(eqn.body), getForIterator(eqn), sizes, listReverse(getForFrames(eqn)), indices);
           end if;
-          (frames, removed_diagonals_opt)                 := Slice.recollectRangesHeuristic(frame_locations);
-
-          // solve the body equation for the cref if needed
-          // ToDo: act on solving status not equal to EXPLICIT ?
-          body_lst := match cref_opt
-            local
-              ComponentRef cref;
-            case SOME(cref) algorithm
-              // first solve then replace iterators
-              (body, funcTree, solve_status, _) := Solve.solveBody(List.first(eqn.body), cref, funcTree);
-              body := map(body, function Replacements.applySimpleExp(replacements = replacements));
-
-              // if there is a diagonal to remove, get the necessary linear maps
-              if Util.isSome(removed_diagonals_opt) then
-                removed_diagonals := Util.getOption(removed_diagonals_opt);
-                removed_diagonals_linear_maps := UnorderedMap.toList(removed_diagonals);
-                condition := Expression.MULTARY(
-                  arguments     = list(makeInequality(tpl) for tpl in removed_diagonals_linear_maps),
-                  inv_arguments = {},
-                  operator      = Operator.OPERATOR(Type.BOOLEAN(), NFOperator.Op.AND)
-                );
-                // removed diagonal is represented with IF_EQUATION
-                body := IF_EQUATION(
-                  size    = Equation.size(Pointer.create(body)),
-                  body    = IF_EQUATION_BODY(
-                    condition = condition,
-                    then_eqns = {Pointer.create(body)},
-                    else_if   = NONE() ),
-                  source  = eqn.source,
-                  attr    = eqn.attr
-                );
-              end if;
-            then {body};
-
-            else eqn.body;
-          end match;
-
-          iter := Iterator.fromFrames(frames);
-          size := Iterator.size(iter) * sum(Equation.size(Pointer.create(eq)) for eq in body_lst);
-          sliced := FOR_EQUATION(
-            size    = size,
-            iter    = iter,
-            body    = body_lst,
-            source  = eqn.source,
-            attr    = eqn.attr
-          );
-          // create a new pointer and do not overwrite the old one!
-        then (Pointer.create(sliced), slicing_status, solve_status);
+        then (sliced_eqn, slicing_status);
 
         else algorithm
           Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because slicing is not yet supported for: \n" + toString(eqn)});
         then fail();
       end match;
     end slice;
+
+    function sliceFor
+      input Equation body;
+      input Iterator iter;
+      input list<Integer> sizes;
+      input list<Frame> frames;
+      input list<Integer> indices;
+      input Boolean naive = false;
+      output list<Pointer<Equation>> result;
+    protected
+      list<Integer> location;
+      list<Frame> new_frames;
+      list<list<Integer>> locations;
+      list<array<Integer>> locations_T;
+      list<FrameLocation> frame_locations;
+      UnorderedMap<ComponentRef, Expression> replacements;
+      FrameOrderingStatus frame_status;
+      RecollectStatus recollect_status;
+      Equation tmp;
+      Option<UnorderedMap<ComponentRef, Expression>> removed_diagonals_opt;
+      Integer size;
+      Iterator new_iter;
+    algorithm
+      // get the sizes of the 'return value' of the equation
+      if listLength(indices) == 1 then
+        // perform a single replacement for the one index
+        location      := Slice.indexToLocation(listHead(indices), sizes);
+        replacements  := UnorderedMap.new<Expression>(ComponentRef.hash, ComponentRef.isEqual);
+        Iterator.createLocationReplacements(iter, listArray(location), replacements);
+        tmp           := map(body, function Replacements.applySimpleExp(replacements = replacements));
+        result        := {Pointer.create(tmp)};
+      else
+        // create the frame locations
+        locations                                       := list(Slice.indexToLocation(idx, sizes) for idx in indices);
+        locations_T                                     := Slice.transposeLocations(locations, listLength(sizes));
+        frame_locations                                 := List.zip(locations_T, frames);
+        (frame_locations, replacements, frame_status)   := Slice.orderTransposedFrameLocations(frame_locations);
+        if frame_status == FrameOrderingStatus.FAILURE then
+          if naive then
+            // already tried naive, need to fully scalarize
+            result := List.flatten(list(sliceFor(body, iter, sizes, frames, {i}, true) for i in indices));
+          else
+            // try naive separation
+            result := List.flatten(list(sliceFor(body, iter, sizes, frames, subset, true) for subset in Slice.naiveSeparation(indices)));
+          end if;
+        else
+          (new_frames, removed_diagonals_opt, recollect_status) := Slice.recollectRangesHeuristic(frame_locations);
+          if recollect_status == RecollectStatus.FAILURE or isSome(removed_diagonals_opt) then
+            if naive then
+              // already tried naive, need to fully scalarize
+              result := List.flatten(list(sliceFor(body, iter, sizes, frames, {i}, true) for i in indices));
+            else
+              // try naive separation
+              result := List.flatten(list(sliceFor(body, iter, sizes, frames, subset, true) for subset in Slice.naiveSeparation(indices)));
+            end if;
+          else
+            // replace iterators
+            tmp := map(body, function Replacements.applySimpleExp(replacements = replacements));
+
+            new_iter  := Iterator.fromFrames(new_frames);
+            size      := Iterator.size(new_iter) * Equation.size(Pointer.create(tmp));
+            tmp       := FOR_EQUATION(
+              size    = size,
+              iter    = new_iter,
+              body    = {tmp},
+              source  = getSource(body),
+              attr    = getAttributes(body));
+            result    := {Pointer.create(tmp)};
+          end if;
+        end if;
+      end if;
+    end sliceFor;
 
     function singleSlice
       input Pointer<Equation> eqn_ptr                             "equation to slice";
@@ -2289,7 +2611,7 @@ public
           // create the replacement rules for this location
           Iterator.createLocationReplacements(eqn.iter, listArray(location), replacements);
           // replace iterators
-          sliced_eqn := map(List.first(eqn.body), function Replacements.applySimpleExp(replacements = replacements));
+          sliced_eqn := map(listHead(eqn.body), function Replacements.applySimpleExp(replacements = replacements));
           // solve the body if necessary
           if not ComponentRef.isEmpty(cref_to_solve) then
             (sliced_eqn, funcTree, _, _) := Solve.solveBody(sliced_eqn, cref_to_solve, funcTree);
@@ -2343,7 +2665,7 @@ public
         case RECORD_EQUATION(lhs = Expression.CREF(cref = lhs_rec), rhs = Expression.CREF(cref = rhs_rec)) algorithm
           lhs_lst := BVariable.getRecordChildren(BVariable.getVarPointer(lhs_rec));
           rhs_lst := BVariable.getRecordChildren(BVariable.getVarPointer(rhs_rec));
-          if List.compareLength(lhs_lst, rhs_lst) == 0 then
+          if List.compareLength(lhs_lst, rhs_lst) == 0 and not Type.isExternalObject(Type.arrayElementType(Expression.typeOf(eqn.lhs))) then
             for tpl in List.zip(lhs_lst, rhs_lst) loop
               (lhs, rhs) := tpl;
               stmts := Statement.ASSIGNMENT(Expression.fromCref(BVariable.getVarName(lhs)), Expression.fromCref(BVariable.getVarName(rhs)), Variable.typeOf(Pointer.access(lhs)), eqn.source) :: stmts;
@@ -4256,6 +4578,20 @@ public
         then fail();
       end match;
     end getUniqueIndex;
+
+    function getEquations
+      input EqData eqData;
+      output EquationPointers equations;
+    algorithm
+      equations := match eqData
+        case EqData.EQ_DATA_SIM() then eqData.equations;
+        case EqData.EQ_DATA_JAC() then eqData.equations;
+        case EqData.EQ_DATA_HES() then eqData.equations;
+        else algorithm
+          Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " failed."});
+        then fail();
+      end match;
+    end getEquations;
 
     function setEquations
       input output EqData eqData;

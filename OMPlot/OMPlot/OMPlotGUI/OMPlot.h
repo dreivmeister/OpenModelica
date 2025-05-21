@@ -32,14 +32,10 @@
 #ifndef OMPLOT_H
 #define OMPLOT_H
 
-#include "PlotWindow.h"
-#include "Legend.h"
-#include "PlotGrid.h"
-#include "PlotZoomer.h"
-#include "PlotPanner.h"
-#include "PlotPicker.h"
-#include "ScaleDraw.h"
-#include "PlotCurve.h"
+#include "qwt_plot.h"
+
+#include <QList>
+#include <QColor>
 
 namespace OMPlot
 {
@@ -88,6 +84,8 @@ public:
   void setFontSizes(double titleFontSize, double verticalAxisTitleFontSize, double verticalAxisNumbersFontSize, double horizontalAxisTitleFontSize,
                     double horizontalAxisNumbersFontSize, double footerFontSize, double legendFontSize);
   static bool prefixableUnit(const QString &unit);
+  static QString convertUnitToSymbol(const QString &displayUnit);
+  static QString convertSymbolToUnit(const QString &symbol);
   static void getUnitPrefixAndExponent(double lowerBound, double upperBound, QString &unitPrefix, int &exponent);
 public slots:
   virtual void replot();

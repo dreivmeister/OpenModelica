@@ -198,6 +198,12 @@ package builtin
     output TypeVar head;
   end listHead;
 
+  function listRest
+    replaceable type TypeVar subtypeof Any;
+    input list<TypeVar> lst;
+    output list<TypeVar> rest;
+  end listRest;
+
   function intString
     input Integer i;
     output String s;
@@ -613,6 +619,15 @@ package SimCode
       BackendDAE.EquationAttributes eqAttr;
     end SES_ARRAY_CALL_ASSIGN;
 
+  record SES_RESIZABLE_ASSIGN
+    "a resizable assignment calling a for loop body function."
+    Integer index;
+    Integer call_index;
+    list<BackendDAE.SimIterator> iters;
+    DAE.ElementSource source;
+    BackendDAE.EquationAttributes eqAttr;
+  end SES_RESIZABLE_ASSIGN;
+
     record SES_GENERIC_ASSIGN
       "a generic assignment calling a for loop body function with an index list."
       Integer index;
@@ -880,18 +895,21 @@ package SimCode
       list<BackendDAE.SimIterator> iters;
       DAE.Exp lhs;
       DAE.Exp rhs;
+      Boolean resizable;
     end SINGLE_GENERIC_CALL;
 
     record IF_GENERIC_CALL
       Integer index;
       list<BackendDAE.SimIterator> iters;
       list<SimBranch> branches;
+      Boolean resizable;
     end IF_GENERIC_CALL;
 
     record WHEN_GENERIC_CALL
       Integer index;
       list<BackendDAE.SimIterator> iters;
       list<SimBranch> branches;
+      Boolean resizable;
     end WHEN_GENERIC_CALL;
   end SimGenericCall;
 
@@ -1454,6 +1472,11 @@ package SimCodeUtil
     input DAE.Exp exp;
     output DAE.Exp nom;
   end getExpNominal;
+
+  function simGenericCallString
+    input SimCode.SimGenericCall call;
+    output String str;
+  end simGenericCallString;
 end SimCodeUtil;
 
 package SimCodeFunctionUtil
@@ -1677,14 +1700,18 @@ package BackendDAE
   uniontype SimIterator
     record SIM_ITERATOR_RANGE
       DAE.ComponentRef name;
-      Integer start;
-      Integer step;
-      Integer size;
+      DAE.Exp start;
+      DAE.Exp step;
+      DAE.Exp stop;
+      DAE.Exp size;
+      Integer non_resizable_size;
+      list<tuple<DAE.ComponentRef, array<DAE.Exp>>> sub_iter;
     end SIM_ITERATOR_RANGE;
     record SIM_ITERATOR_LIST
       DAE.ComponentRef name;
       list<Integer> lst;
       Integer size;
+      list<tuple<DAE.ComponentRef, array<DAE.Exp>>> sub_iter;
     end SIM_ITERATOR_LIST;
   end SimIterator;
 
@@ -3598,12 +3625,6 @@ package List
     output list<list<Type_a>> outParts;
   end splitEqualParts;
 
-  function rest
-    replaceable type Type_a subtypeof Any;
-    input list<Type_a> inList;
-    output list<Type_a> outParts;
-  end rest;
-
   function restOrEmpty
     replaceable type Type_a subtypeof Any;
     input list<Type_a> inList;
@@ -3637,12 +3658,6 @@ package List
     output list<Type_b> outTypeALst;
     replaceable type Type_a subtypeof Any;
   end unzipSecond;
-
-  function first
-    replaceable type ElementType subtypeof Any;
-    input list<ElementType> inList;
-    output ElementType val;
-  end first;
 
   function last
     replaceable type ElementType subtypeof Any;

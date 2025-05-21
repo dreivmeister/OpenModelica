@@ -270,6 +270,8 @@ public:
   QList<Element*> getElementsList() {return mElementsList;}
   QList<Element*> getInheritedElementsList() {return mInheritedElementsList;}
   QList<LineAnnotation*> getConnectionsList() {return mConnectionsList;}
+  static ModelInstance::Connection* createModelInstanceConnection(ModelInstance::Model *pModelInstance, LineAnnotation *pConnectionLineAnnotation);
+  bool addConnectionHelper(LineAnnotation *pConnectionLineAnnotation);
   bool connectionExists(const QString &startElementName, const QString &endElementName, bool inherited);
   void addConnectionDetails(LineAnnotation *pConnectionLineAnnotation);
   void addConnectionToView(LineAnnotation *pConnectionLineAnnotation, bool inherited);
@@ -281,11 +283,13 @@ public:
   void deleteConnectionFromList(LineAnnotation *pConnectionLineAnnotation) {mConnectionsList.removeOne(pConnectionLineAnnotation);}
   void deleteConnectionFromOutOfSceneList(LineAnnotation *pConnectionLineAnnotation) {mOutOfSceneConnectionsList.removeOne(pConnectionLineAnnotation);}
   void removeConnectionDetails(LineAnnotation *pConnectionLineAnnotation);
-  void removeConnectionsFromView();
   void deleteInheritedConnectionFromList(LineAnnotation *pConnectionLineAnnotation) {mInheritedConnectionsList.removeOne(pConnectionLineAnnotation);}
   int numberOfElementConnections(Element *pElement, LineAnnotation *pExcludeConnectionLineAnnotation = 0);
   QString getConnectorName(Element *pConnector);
   QList<LineAnnotation*> getTransitionsList() {return mTransitionsList;}
+  static ModelInstance::Transition* createModelInstanceTransition(ModelInstance::Model *pModelInstance, LineAnnotation *pTransitionLineAnnotation);
+  bool addTransitionHelper(LineAnnotation *pTransitionLineAnnotation);
+  bool updateTransition(LineAnnotation *pTransitionLineAnnotation);
   void addTransitionToView(LineAnnotation *pTransitionLineAnnotation, bool inherited);
   void addTransitionToClass(LineAnnotation *pTransitionLineAnnotation);
   void removeTransitionFromView(LineAnnotation *pTransitionLineAnnotation);
@@ -298,6 +302,7 @@ public:
   void removeTransitionsFromView();
   void deleteInheritedTransitionFromList(LineAnnotation *pTransitionLineAnnotation) {mInheritedTransitionsList.removeOne(pTransitionLineAnnotation);}
   QList<LineAnnotation*> getInitialStatesList() {return mInitialStatesList;}
+  static ModelInstance::InitialState* createModelInstanceInitialState(ModelInstance::Model *pModelInstance, LineAnnotation *pInitialStateLineAnnotation);
   void addInitialStateToView(LineAnnotation *pInitialStateLineAnnotation, bool inherited);
   void addInitialStateToClass(LineAnnotation *pInitialStateLineAnnotation);
   void removeInitialStateFromView(LineAnnotation *pInitialStateLineAnnotation);
@@ -652,8 +657,9 @@ private:
   void drawOMSElement(LibraryTreeItem *pLibraryTreeItem, const QString &annotation);
   void drawOMSModelConnections();
   void associateBusWithConnectors(Element *pBusComponent, GraphicsView *pGraphicsView);
-  bool dependsOnModel(const QString &modelName);
+  bool dependsOnModel(const QString &modelName, bool unload);
   void updateElementModeButtons();
+  void reDrawModelWidgetHelper();
 private slots:
   void showIconView(bool checked);
   void showDiagramView(bool checked);
@@ -667,7 +673,7 @@ public slots:
   void showDocumentationView();
   void handleCanUndoChanged(bool canUndo);
   void handleCanRedoChanged(bool canRedo);
-  void updateModelIfDependsOn(const QString &modelName);
+  void updateModelIfDependsOn(const QString &modelName, bool unload);
 protected:
   virtual void closeEvent(QCloseEvent *event) override;
 };

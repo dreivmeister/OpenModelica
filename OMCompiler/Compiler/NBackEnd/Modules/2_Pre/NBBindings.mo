@@ -41,7 +41,7 @@ protected
   import NBEquation.{Equation, EquationPointers, EqData};
   import Variable = NFVariable;
   import BVariable = NBVariable;
-  import NBVariable.{VariablePointers, VarData};
+  import NBVariable.{VariablePointers, VariablePointer, VarData};
 
   // Util
   import StringUtil;
@@ -61,6 +61,7 @@ public
         list<Pointer<Equation>> binding_rec = {}    "list of created record binding equations";
         Pointer<Variable> parent                    "optional record parent";
         Boolean skip_record_element                 "true if this variable is part of an array and the array variable is bound";
+        UnorderedSet<VariablePointer> new_iters = UnorderedSet.new(BVariable.hash, BVariable.equalName);
 
       case BackendDAE.MAIN(varData = varData as VarData.VAR_DATA_SIM(), eqData = eqData as EqData.EQ_DATA_SIM())
       algorithm
@@ -68,31 +69,32 @@ public
         bound_vars := list(var for var guard(BVariable.isBound(var)) in VariablePointers.toList(varData.unknowns));
         for var in bound_vars loop
           // do not create bindings for record children with bound parents! they are bound off their record variables
+          // if the parent is not fully unkown also create individual bindings
           skip_record_element := match BVariable.getParent(var)
-            case SOME(parent) then BVariable.isBound(parent);
+            case SOME(parent) then BVariable.isBound(parent) and BVariable.isUnknownRecord(parent);
             else false;
           end match;
 
           if not skip_record_element then
             if BVariable.isContinuous(var, false) then
-              binding_cont := Equation.generateBindingEquation(var, eqData.uniqueIndex, false) :: binding_cont;
+              binding_cont := Equation.generateBindingEquation(var, eqData.uniqueIndex, false, new_iters) :: binding_cont;
             else
-              binding_disc := Equation.generateBindingEquation(var, eqData.uniqueIndex, false) :: binding_disc;
+              binding_disc := Equation.generateBindingEquation(var, eqData.uniqueIndex, false, new_iters) :: binding_disc;
             end if;
           end if;
         end for;
 
         // create record binding equations, but only for unknown records
         // known record binding equations will be created for initialization
-        bound_vars := list(var for var guard(BVariable.isBound(var) and not BVariable.isKnownRecord(var)) in VariablePointers.toList(varData.records));
+        bound_vars := list(var for var guard(BVariable.isBound(var) and BVariable.isUnknownRecord(var)) in VariablePointers.toList(varData.records));
         for var in bound_vars loop
-          binding_rec := Equation.generateBindingEquation(var, eqData.uniqueIndex, false) :: binding_rec;
+          binding_rec := Equation.generateBindingEquation(var, eqData.uniqueIndex, false, new_iters) :: binding_rec;
         end for;
 
         // create clock bindings
         bound_clocks := list(var for var guard(BVariable.isBound(var)) in VariablePointers.toList(varData.clocks));
         for var in bound_clocks loop
-          binding_clck := Equation.generateBindingEquation(var, eqData.uniqueIndex, false) :: binding_clck;
+          binding_clck := Equation.generateBindingEquation(var, eqData.uniqueIndex, false, new_iters) :: binding_clck;
         end for;
 
         // adding all continuous equations
@@ -115,6 +117,8 @@ public
 
         bdae.eqData := eqData;
 
+        bdae.varData := VarData.addTypedList(bdae.varData, UnorderedSet.toList(new_iters), NBVariable.VarData.VarType.ITERATOR);
+
         if Flags.isSet(Flags.DUMP_BACKENDDAE_INFO) then
           Error.addSourceMessage(Error.BACKENDDAEINFO_LOWER,{
             intString(EqData.scalarSize(eqData)) + " (" + intString(EqData.size(eqData)) + ")",
@@ -123,14 +127,14 @@ public
         end if;
 
         if Flags.isSet(Flags.DUMP_BINDINGS) then
-          print(List.toString(binding_cont, function Equation.pointerToString(str = ""),
-            StringUtil.headline_4("Created Continuous Binding Equations (" + intString(listLength(binding_cont)) + "):"), "\t", "\n\t", "", false) + "\n\n");
-          print(List.toString(binding_clck, function Equation.pointerToString(str = ""),
-            StringUtil.headline_4("Created Clocked Binding Equations (" + intString(listLength(binding_clck)) + "):"), "\t", "\n\t", "", false) + "\n\n");
-          print(List.toString(binding_disc, function Equation.pointerToString(str = ""),
-            StringUtil.headline_4("Created Discrete Binding Equations (" + intString(listLength(binding_disc)) + "):"), "\t", "\n\t", "", false) + "\n\n");
-          print(List.toString(binding_rec, function Equation.pointerToString(str = ""),
-            StringUtil.headline_4("Created Record Binding Equations (" + intString(listLength(binding_rec)) + "):"), "\t", "\n\t", "", false) + "\n\n");
+          print(List.toString(binding_cont, function Equation.pointerToString(str = "\t"),
+            StringUtil.headline_4("Created Continuous Binding Equations (" + intString(listLength(binding_cont)) + "):"), "", "\n", "", false) + "\n\n");
+          print(List.toString(binding_clck, function Equation.pointerToString(str = "\t"),
+            StringUtil.headline_4("Created Clocked Binding Equations (" + intString(listLength(binding_clck)) + "):"), "", "\n", "", false) + "\n\n");
+          print(List.toString(binding_disc, function Equation.pointerToString(str = "\t"),
+            StringUtil.headline_4("Created Discrete Binding Equations (" + intString(listLength(binding_disc)) + "):"), "", "\n", "", false) + "\n\n");
+          print(List.toString(binding_rec, function Equation.pointerToString(str = "\t"),
+            StringUtil.headline_4("Created Record Binding Equations (" + intString(listLength(binding_rec)) + "):"), "", "\n", "", false) + "\n\n");
         end if;
 
       then bdae;

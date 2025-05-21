@@ -3483,7 +3483,7 @@ public function makeTuple
   input list<DAE.Exp> inExps;
   output DAE.Exp outExp;
 algorithm
-  outExp := if listLength(inExps) > 1 then DAE.TUPLE(inExps) else List.first(inExps);
+  outExp := if listLength(inExps) > 1 then DAE.TUPLE(inExps) else listHead(inExps);
 end makeTuple;
 
 
@@ -6136,7 +6136,7 @@ public function extractCrefsFromExpDerPreStart
   be extreacted as a unique id. Instead you get $DER.x. Same goes for pre and start.
   If `expand` is true crefs will be expanded."
   input DAE.Exp inExp;
-  input Boolean expand;
+  input Boolean expand = true;
   output list<DAE.ComponentRef> ocrefs;
 algorithm
   (_,ocrefs) := traverseExpTopDown(inExp, traversingComponentRefFinderDerPreStart, {});

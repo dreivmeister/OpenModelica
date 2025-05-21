@@ -32,8 +32,10 @@
 #ifndef PLOTCURVE_H
 #define PLOTCURVE_H
 
-#include "OMPlot.h"
-#include <qwt_plot_directpainter.h>
+#include "PlotWindow.h"
+
+#include "qwt_plot_directpainter.h"
+#include "qwt_plot_marker.h"
 
 namespace OMPlot
 {
@@ -111,7 +113,7 @@ public:
   void setCustomColor(bool value);
   bool hasCustomColor();
   void toggleVisibility(bool visibility);
-  void resetPrefixUnit();
+  void resetPrefixUnit(bool resetValues);
   void plotData(bool toggleSign = false);
   QwtPlotDirectPainter* getPlotDirectPainter() {return mpPlotDirectPainter;}
   QwtPlotMarker* getPointMarker() const {return mpPointMarker;}

@@ -572,18 +572,6 @@ algorithm
   outList := append_reverse(lst1,inElement::lst2);
 end set;
 
-public function first<T>
-  "Returns the first element of a list. Fails if the list is empty."
-  input list<T> inList;
-  output T out;
-algorithm
-  out := match(inList)
-    local
-      T e;
-    case e :: _ then e;
-  end match;
-end first;
-
 public function firstOrEmpty<T>
   "Returns the first element of a list as a list, or an empty list if the given
    list is empty."
@@ -604,7 +592,7 @@ public function second<T>
   input list<T> inList;
   output T outSecond;
 algorithm
-  outSecond := listGet(inList, 2);
+  _ :: outSecond :: _ := inList;
 end second;
 
 public function last<T>
@@ -658,16 +646,8 @@ algorithm
   end for;
 end trimToLength;
 
-public function rest<T>
-  "Returns all elements except for the first in a list."
-  input list<T> inList;
-  output list<T> outList;
-algorithm
-  _ :: outList := inList;
-end rest;
-
 public function restOrEmpty<T>
-  "Returns all elements except for the first in a list, or the empty list of the
+  "Returns all elements except for the first in a list, or the empty list if the
    list is empty."
   input list<T> inList;
   output list<T> outList;
@@ -1565,6 +1545,7 @@ public function intersection1OnTrue<T>
   end CompFunc;
 protected
   Option<T> oe;
+  list<T> lst1 = inList1, lst2 = inList2;
 algorithm
   if listEmpty(inList1) then
     return;
@@ -1573,7 +1554,18 @@ algorithm
     outList1Rest := inList1;
     return;
   end if;
-  for e in inList1 loop
+
+  while not (listEmpty(lst1) or listEmpty(lst2)) loop
+    if not inCompFunc(listHead(lst1), listHead(lst2)) then
+      break;
+    end if;
+
+    outIntersection := listHead(lst1) :: outIntersection;
+    lst1 := listRest(lst1);
+    lst2 := listRest(lst2);
+  end while;
+
+  for e in lst1 loop
     if isMemberOnTrue(e, inList2, inCompFunc) then
       outIntersection := e :: outIntersection;
     elseif isPresent(outList1Rest) then
@@ -1650,7 +1642,7 @@ algorithm
   end if;
 
   for e in inList2 loop
-    outDifference := deleteMember(outDifference, e);
+    outDifference := deleteMemberOnTrue(e, outDifference, valueEq);
   end for;
 end setDifference;
 
@@ -3526,12 +3518,12 @@ public function flatten<T>
    of the sublists. O(len(outList))
      Example: flatten({{1, 2}, {3, 4, 5}, {6}, {}}) => {1, 2, 3, 4, 5, 6}"
   input list<list<T>> inList;
-  output list<T> outList = if listEmpty(inList) then {} elseif hasOneElement(inList) then first(inList) else listAppend(lst for lst in listReverse(inList));
+  output list<T> outList = if listEmpty(inList) then {} elseif hasOneElement(inList) then listHead(inList) else listAppend(lst for lst in listReverse(inList));
 end flatten;
 
 public function flattenReverse<T>
   input list<list<T>> inList;
-  output list<T> outList = if listEmpty(inList) then {} elseif hasOneElement(inList) then first(inList) else listAppend(lst for lst in inList);
+  output list<T> outList = if listEmpty(inList) then {} elseif hasOneElement(inList) then listHead(inList) else listAppend(lst for lst in inList);
 end flattenReverse;
 
 public function thread<T>
@@ -4875,39 +4867,6 @@ algorithm
   outElement := inFalseValue;
 end findBoolList;
 
-public function deleteMember<T>
-  "Takes a list and a value, and deletes the first occurence of the value in the
-   list. Example: deleteMember({1, 2, 3, 2}, 2) => {1, 3, 2}"
-  input list<T> inList;
-  input T inElement;
-  output list<T> outList = {};
-protected
-  T e;
-  list<T> rest = inList;
-algorithm
-  while not listEmpty(rest) loop
-    e :: rest := rest;
-
-    if valueEq(e, inElement) then
-      outList := append_reverse(outList, rest);
-      return;
-    end if;
-
-    outList := e :: outList;
-  end while;
-  outList := inList;
-end deleteMember;
-
-public function deleteMemberF<T>
-  "Same as deleteMember, but fails if the element isn't present in the list."
-  input list<T> inList;
-  input T inElement;
-  output list<T> outList;
-algorithm
-  outList := deleteMember(inList, inElement);
-  if referenceEq(outList, inList) then fail(); end if;
-end deleteMemberF;
-
 public function deleteMemberOnTrue<T, VT>
   "Takes a list and a value and a comparison function and deletes the first
   occurence of the value in the list for which the function returns true. It
@@ -4933,8 +4892,10 @@ algorithm
     e :: rest := rest;
 
     if inCompareFunc(inValue, e) then
-      outList := append_reverse(acc, rest);
-      outDeletedElement := SOME(e);
+      outList := listAppend(listReverseInPlace(acc), rest);
+      if isPresent(outDeletedElement) then
+        outDeletedElement := SOME(e);
+      end if;
       return;
     end if;
 

@@ -225,7 +225,8 @@ public
       // if it has a statement index, it already has been created as a statement inside an algorithm (0 implies no index)
       if cond.stmt_index == 0 then
         // lower the subscripts (containing iterators)
-        lhs_cref := ComponentRef.mapSubscripts(BVariable.getVarName(aux_var), function Subscript.mapExp(func = function BackendDAE.lowerComponentReferenceExp(variables = variables)));
+        lhs_cref := ComponentRef.mapSubscripts(BVariable.getVarName(aux_var), function Subscript.mapExp(
+          func = function BackendDAE.lowerComponentReferenceExp(variables = variables, complete = true)));
         aux_eqn := Equation.makeAssignment(Expression.fromCref(lhs_cref), cond.exp, idx, "EVT", cond.iter, EquationAttributes.default(EquationKind.DISCRETE, false));
         auxiliary_eqns := aux_eqn :: auxiliary_eqns;
       end if;
@@ -248,7 +249,8 @@ public
         // add all new statements to the algorithm body
         for tpl in Util.getOption(bucket.aux_stmts) loop
           (cond, aux) := tpl;
-          aux               := ComponentRef.mapSubscripts(aux, function Subscript.mapExp(func = function BackendDAE.lowerComponentReferenceExp(variables = variables)));
+          aux               := ComponentRef.mapSubscripts(aux, function Subscript.mapExp(func =
+            function BackendDAE.lowerComponentReferenceExp(variables = variables, complete = true)));
           new_stmt          := Statement.makeAssignment(Expression.fromCref(aux), cond.exp, ComponentRef.getSubscriptedType(aux), DAE.emptyElementSource);
           new_stmts         := new_stmt :: new_stmts;
         end for;
@@ -1043,12 +1045,12 @@ protected
 
       // For when equations only map the condition and not the body
       case Equation.WHEN_EQUATION() algorithm
-        eqn.body := WhenEquationBody.mapCondition(eqn.body, collector, NONE(), Expression.mapReverse);
+        eqn.body := WhenEquationBody.mapCondition(eqn.body, collector, NONE(), Expression.fakeMap);
       then eqn;
 
       // Also don't do it for when equations in for-equations
       case Equation.FOR_EQUATION(body = {body_eqn as Equation.WHEN_EQUATION()}) algorithm
-        body_eqn.body := WhenEquationBody.mapCondition(body_eqn.body, collector, NONE(), Expression.mapReverse);
+        body_eqn.body := WhenEquationBody.mapCondition(body_eqn.body, collector, NONE(), Expression.fakeMap);
         eqn.body := {body_eqn};
       then eqn;
 
@@ -1061,7 +1063,7 @@ protected
           mapFunc     = Expression.mapReverse);
       then eqn;
 
-      else Equation.map(eqn, collector, NONE(), Expression.mapReverse);
+      else Equation.map(eqn, collector, NONE(), Expression.fakeMap);
     end match;
 
     if not referenceEq(eqn, Pointer.access(eqn_ptr)) then
@@ -1135,18 +1137,21 @@ protected
       // ToDo: if they are not ranges we need to normalize them
       case Expression.CALL(call = call as Call.TYPED_REDUCTION()) algorithm
         new_frames := list((ComponentRef.fromNode(Util.tuple21(tpl), Type.INTEGER()), Util.tuple22(tpl), NONE()) for tpl in call.iters);
-        call.exp := Expression.mapReverse(call.exp, function collectEventsTraverse(
-          bucket_ptr  = bucket_ptr,
-          iter        = Iterator.addFrames(iter, new_frames),
-          eqn         = eqn,
-          funcTree    = funcTree,
-          createEqn   = createEqn));
+        call.exp := collectEventsTraverse(call.exp, bucket_ptr, Iterator.addFrames(iter, new_frames), eqn, funcTree, createEqn);
         exp.call := call;
       then exp;
 
+      // don't traverse cref subscripts
+      case Expression.CREF() then exp;
+
       // ToDo: math events (check the call name in a function and merge with sample case?)
 
-      else exp;
+      else Expression.mapShallow(exp, function collectEventsTraverse(
+        bucket_ptr  = bucket_ptr,
+        iter        = iter,
+        eqn         = eqn,
+        funcTree    = funcTree,
+        createEqn   = createEqn));
     end match;
   end collectEventsTraverse;
 

@@ -753,6 +753,7 @@ IfExpression12.mo \
 IfExpression14.mo \
 IfExpression15.mo \
 IfExpression16.mo \
+IfExpression17.mo \
 IfEquationInvalidCond1.mo \
 ih1.mo \
 ih2.mo \
@@ -856,6 +857,7 @@ lookup2.mo \
 lookup3.mo \
 lookup4.mo \
 LookupLibrary1.mo \
+LookupLibrary2.mo \
 loop1.mo \
 loop2.mo \
 loop3.mo \
@@ -1102,6 +1104,7 @@ Size3.mo \
 Size4.mo \
 Size5.mo \
 Size6.mo \
+Size7.mo \
 SizeInvalidArgs1.mo \
 SizeInvalidArgs2.mo \
 SizeInvalidIndex1.mo \

@@ -756,7 +756,7 @@ algorithm
       String fileprefix, fileNamePrefixHash;
       String install_include_omc_dir, install_include_omc_c_dir, install_share_buildproject_dir, install_fmu_sources_dir, fmu_tmp_sources_dir;
       String cmakelistsStr, needCvode, cvodeDirectory;
-      list<String> sourceFiles, model_desc_src_files, fmi2HeaderFiles;
+      list<String> sourceFiles, model_desc_src_files, fmi2HeaderFiles, modelica_standard_table_sources;
       list<String> dgesv_sources, cminpack_sources, simrt_c_sundials_sources, simrt_linear_solver_sources, simrt_non_linear_solver_sources;
       list<String> simrt_mixed_solver_sources, fmi_export_files, model_gen_files, model_all_gen_files, shared_source_files;
       SimCode.VarInfo varInfo;
@@ -858,23 +858,19 @@ algorithm
         // The simrt C source files are installed to the folder specified by RuntimeSources.fmu_sources_dir. Copy them from there.
         copyFiles(RuntimeSources.simrt_c_sources, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
 
-        if varInfo.numLinearSystems > 0 or varInfo.numNonLinearSystems > 0 then
-          // The dgesv headers are in the RuntimeSources.fmu_sources_dir for now since they are not properly installed in the include folder
-          copyFiles(RuntimeSources.dgesv_headers, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
-          copyFiles(RuntimeSources.dgesv_sources, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
-          dgesv_sources := RuntimeSources.dgesv_sources;
-        else
-          dgesv_sources := {};
-        end if;
+        /*
+        * fix issue https://github.com/OpenModelica/OpenModelica/issues/13719
+        * copy the fmu runtime external solver sources to support source code cross compilation
+        */
+        // The dgesv headers are in the RuntimeSources.fmu_sources_dir for now since they are not properly installed in the include folder
+        copyFiles(RuntimeSources.dgesv_headers, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
+        copyFiles(RuntimeSources.dgesv_sources, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
+        dgesv_sources := RuntimeSources.dgesv_sources;
 
         // Add CMinpack sources to FMU
-        if varInfo.numNonLinearSystems > 0 then
-          copyFiles(RuntimeSources.cminpack_headers, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
-          copyFiles(RuntimeSources.cminpack_sources, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
-          cminpack_sources := RuntimeSources.cminpack_sources;
-        else
-          cminpack_sources := {};
-        end if;
+        copyFiles(RuntimeSources.cminpack_headers, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
+        copyFiles(RuntimeSources.cminpack_sources, source=install_fmu_sources_dir, destination=fmu_tmp_sources_dir);
+        cminpack_sources := RuntimeSources.cminpack_sources;
 
         // Check if the sundials files are needed
         if SimCodeUtil.cvodeFmiFlagIsSet(simCode.fmiSimulationFlags) then
@@ -909,6 +905,15 @@ algorithm
         fmi2HeaderFiles := {"fmi/fmi2Functions.h","fmi/fmi2FunctionTypes.h", "fmi/fmi2TypesPlatform.h", "fmi/fmiModelFunctions.h", "fmi/fmiModelTypes.h"};
         copyFiles(fmi2HeaderFiles, source=install_include_omc_c_dir, destination=fmu_tmp_sources_dir);
 
+        /*
+        * fix issue fhttps://github.com/OpenModelica/OpenModelica/issues/13260
+        * Check if modelicaStandardTables source files are needed
+        * this is not clear as of now, may be we should copy all the external C sources by default
+        */
+        copyFiles(RuntimeSources.modelica_external_c_sources, source=install_include_omc_c_dir, destination=fmu_tmp_sources_dir);
+        copyFiles(RuntimeSources.modelica_external_c_headers, source=install_include_omc_c_dir, destination=fmu_tmp_sources_dir);
+        modelica_standard_table_sources := RuntimeSources.modelica_external_c_sources;
+
         System.writeFile(fmutmp+"/sources/isfmi" + (if FMUVersion=="1.0" then "1" else "2"), "");
 
         model_gen_files := list(simCode.fileNamePrefix + f for f in RuntimeSources.defaultFileSuffixes);
@@ -928,7 +933,8 @@ algorithm
                                                 shared_source_files,
                                                 dgesv_sources,
                                                 cminpack_sources,
-                                                simrt_c_sundials_sources
+                                                simrt_c_sundials_sources,
+                                                modelica_standard_table_sources
                                     });
         end if;
 
@@ -1657,6 +1663,9 @@ algorithm
       else
         matrixnames := {"B", "C", "D", "F", "H"};
       end if;
+      if List.contains(FlagsUtil.getConfigOptionsStringList(Flags.POST_OPT_MODULES), "generateSymbolicSensitivities", stringEq) then
+        matrixnames := "S" :: matrixnames;
+      end if;
       (daeModeSP, uniqueEqIndex, tempVars) := SimCodeUtil.createSymbolicSimulationJacobian(
         inJacobian      = BackendDAE.GENERIC_JACOBIAN(daeModeJac, daeModeSparsity, daeModeColoring, nonlinearPattern),
         iuniqueEqIndex  = uniqueEqIndex,
@@ -1683,6 +1692,9 @@ algorithm
         end if;
       else
         matrixnames := {"A", "B", "C", "D", "F", "H"};
+      end if;
+      if List.contains(FlagsUtil.getConfigOptionsStringList(Flags.POST_OPT_MODULES), "generateSymbolicSensitivities", stringEq) then
+        matrixnames := "S" :: matrixnames;
       end if;
       (symJacs, uniqueEqIndex) := SimCodeUtil.createSymbolicJacobianssSimCode({}, crefToSimVarHT, uniqueEqIndex, matrixnames, {});
     end if;

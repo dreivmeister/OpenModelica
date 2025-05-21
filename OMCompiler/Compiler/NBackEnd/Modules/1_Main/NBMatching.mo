@@ -146,14 +146,14 @@ public
       (adj, full, vars, eqns, varData, eqData, funcTree, changed) := ResolveSingularities.balanceInitialization(adj, full, vars, eqns, varData, eqData, funcTree, matching, mapping);
     else
       // ####### INDEX REDUCTION #######
-      (adj, full, vars, eqns, varData, eqData, funcTree, changed) := ResolveSingularities.noIndexReduction(adj, full, vars, eqns, varData, eqData, funcTree, matching, mapping);
+      (adj, full, vars, eqns, varData, eqData, funcTree, changed) := ResolveSingularities.indexReduction(adj, full, vars, eqns, varData, eqData, funcTree, matching, mapping);
     end if;
 
     // 3. Recompute adjacency and restart matching if something changed in step 2.
     if changed then
       // ToDo: keep more of old information by only updating changed stuff
-      adj := Adjacency.Matrix.createFull(vars, eqns);
-      adj := Adjacency.Matrix.fromFull(adj, vars.map, eqns.map, eqns, matrixStrictness);
+      full  := Adjacency.Matrix.createFull(vars, eqns);
+      adj   := Adjacency.Matrix.fromFull(full, vars.map, eqns.map, eqns, matrixStrictness);
       if Kind == NBPartition.Kind.INI then
         // ####### DO NOT REDO BALANCING INITIALIZATION #######
         matching := regular(EMPTY_MATCHING, adj);
@@ -194,6 +194,24 @@ public
       then fail();
     end match;
   end continue_;
+
+  function isEmpty
+    input Matching matching;
+    output Boolean b = arrayEmpty(matching.eqn_to_var) and arrayEmpty(matching.var_to_eqn);
+  end isEmpty;
+
+  function isPerfect
+    "returns true if all variables OR equations have been matched
+    Note: if it's not a square problem, it returns true if one of the two is fully matched"
+    input Matching matching;
+    output Boolean b;
+  algorithm
+    if arrayLength(matching.var_to_eqn) > arrayLength(matching.eqn_to_var) then
+      b := Array.all(matching.eqn_to_var, function intGt(i2 = 0));
+    else
+      b := Array.all(matching.var_to_eqn, function intGt(i2 = 0));
+    end if;
+  end isPerfect;
 
   function getAssignments
     "expands the assignments with -1 if needed"

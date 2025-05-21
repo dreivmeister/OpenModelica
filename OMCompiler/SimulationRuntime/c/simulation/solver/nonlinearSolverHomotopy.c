@@ -44,6 +44,7 @@
 
 #include "../options.h"
 #include "../simulation_info_json.h"
+#include "../jacobian_util.h"
 #include "../../util/omc_error.h"
 #include "../../util/omc_file.h"
 #include "../../util/varinfo.h"
@@ -812,14 +813,6 @@ void orthogonalBacktraceMatrix(DATA_HOMOTOPY* solverData, double* hJac, double* 
   hJac2[n + m*m] = 0;
 }
 
-void swapPointer(double* *p1, double* *p2)
-{
-  double* help;
-  help = *p1;
-  *p1 = *p2;
-  *p2 = help;
-}
-
 /*! \fn getAnalyticalJacobian
  *
  *  function calculates analytical jacobian
@@ -833,43 +826,20 @@ void swapPointer(double* *p1, double* *p2)
  */
 int getAnalyticalJacobianHomotopy(DATA_HOMOTOPY* solverData, double* jac)
 {
-  int i,j,k,l,ii;
+  int j,k,l,ii;
   DATA* data = solverData->userData->data;
   threadData_t *threadData = solverData->userData->threadData;
-  NONLINEAR_SYSTEM_DATA* systemData = solverData->userData->nlsData;
-  ANALYTIC_JACOBIAN* jacobian = solverData->userData->analyticJacobian;
+  JACOBIAN* jacobian = solverData->userData->analyticJacobian;
+  const SPARSE_PATTERN* sp = jacobian->sparsePattern;
 
-  memset(jac, 0, (solverData->n)*(solverData->n)*sizeof(double));
+  evalJacobian(data, threadData, jacobian, NULL, jac);
 
-  if (jacobian->constantEqns != NULL) {
-    jacobian->constantEqns(data, threadData, jacobian, NULL);
-  }
-
-  for(i=0; i < jacobian->sparsePattern->maxColors; i++)
-  {
-    /* activate seed variable for the corresponding color */
-    for(ii=0; ii < jacobian->sizeCols; ii++)
-      if(jacobian->sparsePattern->colorCols[ii]-1 == i)
-        jacobian->seedVars[ii] = 1;
-
-    systemData->analyticalJacobianColumn(data, threadData, jacobian, NULL);
-
-    for(j = 0; j < jacobian->sizeCols; j++)
-    {
-      if(jacobian->seedVars[j] == 1)
-      {
-        ii = jacobian->sparsePattern->leadindex[j];
-        while(ii < jacobian->sparsePattern->leadindex[j+1])
-        {
-          l  = jacobian->sparsePattern->index[ii];
-          k  = j*jacobian->sizeRows + l;
-          jac[k] = jacobian->resultVars[l] * solverData->xScaling[j];
-          ii++;
-        };
-      }
-      /* de-activate seed variable for the corresponding color */
-      if(jacobian->sparsePattern->colorCols[j]-1 == i)
-        jacobian->seedVars[j] = 0;
+  /* apply scaling to each column */
+  for (j = 0; j < jacobian->sizeCols; j++) {
+    for (ii = sp->leadindex[j]; ii < sp->leadindex[j+1]; ii++) {
+      l = sp->index[ii];
+      k = j*jacobian->sizeRows + l;
+      jac[k] *= solverData->xScaling[j];
     }
   }
 

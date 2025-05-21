@@ -2280,7 +2280,7 @@ algorithm
   eqn := BackendEquation.get(eqns, eqNum);
   v := match eqn
     case BackendDAE.WHEN_EQUATION() then
-      BackendVariable.makeVar(DAE.WILD()); // dummy, not used
+      BackendVariable.makeVar(DAE.emptyCref); // dummy, not used
     else
       BackendVariable.getVarAt(vars, varNum);
   end match;
@@ -5026,6 +5026,9 @@ algorithm
           end if;
         else
            matrixnames := {"A", "B", "C", "D", "F", "H"};
+        end if;
+        if List.contains(FlagsUtil.getConfigOptionsStringList(Flags.POST_OPT_MODULES), "generateSymbolicSensitivities", stringEq) then
+          matrixnames := "S" :: matrixnames;
         end if;
         (res, ouniqueEqIndex) := createSymbolicJacobianssSimCode(inSymjacs, crefSimVarHT, iuniqueEqIndex, matrixnames, {});
         // _ := FlagsUtil.set(Flags.EXEC_STAT, b);
@@ -8060,7 +8063,7 @@ algorithm
 
       //check these equations again
       newEqIdcs := arrayGet(mT,varIdx0);
-      newEqIdcs := List.deleteMember(newEqIdcs,eqIdx);
+      newEqIdcs := List.deleteMemberOnTrue(eqIdx,newEqIdcs,intEq);
       workList := List.append_reverse(newEqIdcs,workList);
       //print("check these equations again: "+stringDelimitList(List.map(newEqIdcs,intString),", ")+"\n");
       // replace the var with the new start value in these equations
@@ -8069,7 +8072,7 @@ algorithm
       eqArr := List.threadFold(newEqIdcs,eqLst,BackendEquation.setAtIndexFirst,eqs);
       // update the adjacencyMatrix m and remove the idcs for the calculated var
       mEntries := List.map1(newEqIdcs,Array.getIndexFirst,m);
-      mEntries := List.map1(mEntries,List.deleteMember,varIdx0);
+      mEntries := list(List.deleteMemberOnTrue(varIdx0, e, intEq) for e in mEntries);
       List.threadMap1_0(newEqIdcs,mEntries,Array.updateIndexFirst,m);
     else
     end try;
@@ -8547,15 +8550,48 @@ algorithm
 
     case SimCode.IF_GENERIC_CALL() algorithm
       str := "if generic call " + intString(call.index) + " " + List.toString(call.iters, BackendDump.simIteratorString);
+      str := str + List.toString(call.branches, simBranchString, "", "", "\n", "");
     then str;
 
     case SimCode.WHEN_GENERIC_CALL() algorithm
       str := "when generic call " + intString(call.index) + " " + List.toString(call.iters, BackendDump.simIteratorString);
+      str := str + List.toString(call.branches, simBranchString, "", "", "\n", "");
     then str;
 
     else "";
   end match;
 end simGenericCallString;
+
+function simBranchString
+  input SimCode.SimBranch branch;
+  output String str;
+protected
+  function simBranchBodyString
+    input tuple<DAE.Exp, DAE.Exp> tpl;
+    output String str = ExpressionDump.printExpStr(Util.tuple21(tpl)) + " = " + ExpressionDump.printExpStr(Util.tuple22(tpl)) + ";";
+  end simBranchBodyString;
+algorithm
+  str := match branch
+    local
+      Boolean b;
+
+    case SimCode.SIM_BRANCH() algorithm
+      b := Util.isSome(branch.condition);
+      str := if b then "if " + ExpressionDump.printExpStr(Util.getOption(branch.condition)) + " then\n" else "else\n";
+      str := str + List.toString(branch.body, simBranchBodyString, "  ", "  ", "\n", "");
+      str := if b then str + "end if;" else str;
+    then str;
+
+    case SimCode.SIM_BRANCH_STMT() algorithm
+      b := Util.isSome(branch.condition);
+      str := if b then "if " + ExpressionDump.printExpStr(Util.getOption(branch.condition)) + " then\n" else "else\n";
+      str := str + List.toString(branch.body, DAEDump.ppStatementStr, "  ", "  ", "\n", "");
+      str := if b then str + "\nend if;" else str;
+    then str;
+
+    else "";
+  end match;
+end simBranchString;
 
 // one dlow var can result in multiple simvars: input and output are a subset
 // of algvars for example
@@ -9224,6 +9260,11 @@ algorithm
             then ();
         end match;
         s := s+"\n";
+    then s;
+
+    case SimCode.SES_RESIZABLE_ASSIGN()
+      algorithm
+        s := intString(eqSysIn.index) +": "+ " (SES_RESIZABLE_ASSIGN) " + " call index: " + intString(eqSysIn.call_index) + "\n";
     then s;
 
     case SimCode.SES_GENERIC_ASSIGN()
@@ -10659,6 +10700,7 @@ algorithm
     case SimCode.SES_SIMPLE_ASSIGN(source=DAE.SOURCE(info=info)) then info;
     case SimCode.SES_SIMPLE_ASSIGN_CONSTRAINTS(source=DAE.SOURCE(info=info)) then info;
     case SimCode.SES_ARRAY_CALL_ASSIGN(source=DAE.SOURCE(info=info)) then info;
+    case SimCode.SES_RESIZABLE_ASSIGN(source=DAE.SOURCE(info=info)) then info;
     case SimCode.SES_GENERIC_ASSIGN(source=DAE.SOURCE(info=info)) then info;
     case SimCode.SES_ENTWINED_ASSIGN(source=DAE.SOURCE(info=info)) then info;
     case SimCode.SES_WHEN(source=DAE.SOURCE(info=info)) then info;
@@ -10677,6 +10719,7 @@ algorithm
     case SimCode.SES_SIMPLE_ASSIGN(index=index) then index;
     case SimCode.SES_SIMPLE_ASSIGN_CONSTRAINTS(index=index) then index;
     case SimCode.SES_ARRAY_CALL_ASSIGN(index=index) then index;
+    case SimCode.SES_RESIZABLE_ASSIGN(index=index) then index;
     case SimCode.SES_GENERIC_ASSIGN(index=index) then index;
     case SimCode.SES_ENTWINED_ASSIGN(index=index) then index;
     case SimCode.SES_IFEQUATION(index=index) then index;
@@ -13998,18 +14041,18 @@ algorithm
   // --fmiFlags or --fmiFlags=none
   if listEmpty(fmiFlagsList) then
     fmiSimulationFlags := NONE();
-  elseif listLength(fmiFlagsList) == 1 and stringEqual(List.first(fmiFlagsList), "none") then
+  elseif listLength(fmiFlagsList) == 1 and stringEqual(listHead(fmiFlagsList), "none") then
     fmiSimulationFlags := NONE();
 
   // Default case
   // --fmiFlags=default
-  elseif listLength(fmiFlagsList) == 1 and stringEqual(List.first(fmiFlagsList), "default") then
+  elseif listLength(fmiFlagsList) == 1 and stringEqual(listHead(fmiFlagsList), "default") then
     fmiSimulationFlags := SOME(SimCode.defaultFmiSimulationFlags);
 
   // User supplied file
   // --fmiFlags=path/to/*.json
-  elseif listLength(fmiFlagsList) == 1 and stringEqual( List.last(Util.stringSplitAtChar(List.first(fmiFlagsList),".")) , "json" )  then
-    pathToFile := List.first(fmiFlagsList);
+  elseif listLength(fmiFlagsList) == 1 and stringEqual( List.last(Util.stringSplitAtChar(listHead(fmiFlagsList),".")) , "json" )  then
+    pathToFile := listHead(fmiFlagsList);
     if System.regularFileExists(pathToFile) then
       fmiSimulationFlags := SOME(SimCode.FMI_SIMULATION_FLAGS_FILE(path=pathToFile));
       return;
@@ -14142,7 +14185,7 @@ algorithm
     // discreteStates
     if not checkForEmptyBDAE(optcontPartDer) then
       contPartDer := {(optcontPartDer,spPattern,spColors, nlPattern)};
-      ({contSimJac}, uniqueEqIndex) := createSymbolicJacobianssSimCode(contPartDer, crefSimVarHT, uniqueEqIndex, {"FMIDer"}, {});
+      ({contSimJac}, uniqueEqIndex) := createSymbolicJacobianssSimCode(contPartDer, crefSimVarHT, uniqueEqIndex, {"FMIDER"}, {});
       // collect algebraic loops and symjacs for FMIDer
       ({contSimJac}, outModelInfo, symJacs) := addAlgebraicLoopsModelInfoSymJacs({contSimJac}, inModelInfo);
       contPartSimDer := SOME(contSimJac);
@@ -16007,7 +16050,7 @@ algorithm
     Error.addInternalError("Failed to read semantic version from " + pathToCMake, sourceInfo());
     fail();
   end if;
-  cmakeVersionString := List.first(regexOut);
+  cmakeVersionString := listHead(regexOut);
   cmakeVersion := SemanticVersion.parse(cmakeVersionString);
   System.removeFile(cmakeVersionLogFile);
 end getCMakeVersion;

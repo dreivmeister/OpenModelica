@@ -206,7 +206,8 @@ public
     record ITERATOR end ITERATOR;
     record RECORD
       list<Pointer<Variable>> children;
-      Boolean known                         "true if the record is known. e.g. parameters";
+      Variability min_var;
+      Variability max_var;
     end RECORD;
     record START
       Pointer<Variable> original            "Pointer to the corresponding original variable.";
@@ -294,9 +295,12 @@ public
       input Type ty;
       input Boolean makeParam;
       output VariableKind varKind;
+    protected
+      Variability variability;
     algorithm
       if Type.isRecord(Type.arrayElementType(ty)) then
-        varKind := RECORD({}, makeParam); // ToDo: children!
+        variability := if makeParam then NFPrefixes.Variability.PARAMETER else NFPrefixes.Variability.CONTINUOUS;
+        varKind := RECORD({}, variability, variability); // ToDo: children!
       elseif makeParam then
         varKind := PARAMETER(NONE());
       elseif Type.isDiscrete(ty) then
@@ -435,7 +439,7 @@ public
       input Type ty;
       input Attributes compAttrs;
       input list<Variable> children;
-      input Option<SCode.Comment> comment;
+      input SCode.Comment comment;
       output VariableAttributes attributes;
     protected
       Boolean is_final;
@@ -1093,7 +1097,7 @@ public
     function createReal
       input list<tuple<String, Binding>> attrs;
       input Boolean isFinal;
-      input Option<SCode.Comment> comment;
+      input SCode.Comment comment;
       output VariableAttributes attributes;
     protected
       String name;
@@ -1378,7 +1382,7 @@ public
 
     function createTearingSelect
       "__OpenModelica_tearingSelect is an annotation and has to be extracted from the comment."
-      input Option<SCode.Comment> optComment;
+      input SCode.Comment cmt;
       output Option<TearingSelect> tearingSelect = NONE();
     protected
       Option<SCode.Annotation> opt_anno;
@@ -1389,7 +1393,7 @@ public
       String name;
       SourceInfo info;
     algorithm
-      opt_anno := SCodeUtil.optCommentAnnotation(optComment);
+      opt_anno := SCodeUtil.commentAnnotation(cmt);
 
       if isNone(opt_anno) then
         // No annotation.
@@ -1421,7 +1425,7 @@ public
       tearingSelect := lookupTearingSelectMember(name);
 
       if isNone(tearingSelect) then
-        Error.addSourceMessage(Error.UNKNOWN_ANNOTATION_VALUE, {Dump.printExpStr(val)}, info);
+        Error.addSourceMessage(Error.UNKNOWN_ANNOTATION_VALUE, {Dump.printExpStr(val), "__OpenModelica_tearingSelect"}, info);
       end if;
     end createTearingSelect;
 
@@ -1437,12 +1441,12 @@ public
                  Absyn.ComponentRef.CREF_IDENT(name = name, subscripts = {})))
           then name;
 
-        // Single name without the TearingSelect prefix is deprecated but still accepted.
+        // Single name without the TearingSelect prefix is deprecated and no longer accepted.
         case Absyn.Exp.CREF(componentRef = Absyn.ComponentRef.CREF_IDENT(name = name, subscripts = {}))
           algorithm
             Error.addSourceMessage(Error.DEPRECATED_EXPRESSION, {name, "TearingSelect." + name}, info);
           then
-            name;
+            "";
 
         else "";
       end match;
@@ -1491,7 +1495,7 @@ public
     end ANNOTATIONS;
 
     function create
-      input Option<SCode.Comment> comment;
+      input SCode.Comment comment;
       input Attributes attributes;
       output Annotations annotations = EMPTY_ANNOTATIONS;
     protected
@@ -1504,7 +1508,7 @@ public
       end if;
 
       _ := match comment
-        case SOME(SCode.COMMENT(annotation_=SOME(SCode.ANNOTATION(modification=mod as SCode.MOD())))) algorithm
+        case SCode.COMMENT(annotation_=SOME(SCode.ANNOTATION(modification=mod as SCode.MOD()))) algorithm
           for submod in mod.subModLst loop
             _ := match submod
               case SCode.NAMEMOD(ident = "HideResult", mod = SCode.MOD(binding = SOME(Absyn.BOOL(true)))) algorithm

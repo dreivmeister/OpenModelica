@@ -193,14 +193,28 @@ public
     output VarData varData;
   algorithm
     varData := match bdae
-      case MAIN() then bdae.varData;
+      case MAIN()     then bdae.varData;
       case JACOBIAN() then bdae.varData;
-      case HESSIAN() then bdae.varData;
+      case HESSIAN()  then bdae.varData;
       else algorithm
         Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " failed."});
       then fail();
     end match;
   end getVarData;
+
+  function setVarData
+    input output BackendDAE bdae;
+    input VarData varData;
+  algorithm
+    bdae := match bdae
+      case MAIN()     algorithm bdae.varData := varData; then bdae;
+      case JACOBIAN() algorithm bdae.varData := varData; then bdae;
+      case HESSIAN()  algorithm bdae.varData := varData; then bdae;
+      else algorithm
+        Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " failed."});
+      then fail();
+    end match;
+  end setVarData;
 
   function getFunctionTree
     input BackendDAE bdae;
@@ -388,9 +402,14 @@ public
     input output BackendDAE bdae;
     input Boolean init;
   protected
+    Pointer<list<Pointer<Variable>>> acc_discrete_states = Pointer.create({});
+    Pointer<list<Pointer<Variable>>> acc_previous = Pointer.create({});
+
     BEquation.MapFuncEqn func = function Equation.simplify(
             name = getInstanceName(),
             indent = "",
+            acc_discrete_states = acc_discrete_states,
+            acc_previous = acc_previous,
             simplifyExp = function SimplifyExp.simplifyDump(
               includeScope = true,
               name = getInstanceName(),
@@ -399,6 +418,9 @@ public
     bdae := match bdae
       local
         EqData eqData;
+        VarData varData;
+        list<Pointer<Variable>> acc_discrete_states_accessed;
+
       case MAIN(eqData = eqData as BEquation.EQ_DATA_SIM()) algorithm
         if init then
           eqData.initials := EquationPointers.map(eqData.initials, func);
@@ -406,6 +428,30 @@ public
           eqData.equations := EquationPointers.map(eqData.equations, func);
         end if;
         bdae.eqData := EqData.compress(eqData);
+
+        // update varData with accs obtained from mapping
+        bdae.varData := match bdae.varData
+          case varData as VarData.VAR_DATA_SIM() algorithm
+            acc_discrete_states_accessed := Pointer.access(acc_discrete_states);
+
+            VariablePointers.removeList(acc_discrete_states_accessed, varData.unknowns);
+            VariablePointers.removeList(acc_discrete_states_accessed, varData.discretes);
+            VariablePointers.removeList(acc_discrete_states_accessed, varData.discrete_states);
+            // TODO: CLOCKED?
+
+            VariablePointers.removeList(Pointer.access(acc_previous), varData.previous);
+            VariablePointers.removeList(Pointer.access(acc_previous), varData.variables);
+
+            VariablePointers.addList(acc_discrete_states_accessed, varData.parameters);
+            VariablePointers.addList(acc_discrete_states_accessed, varData.knowns);
+
+            for v in acc_discrete_states_accessed loop
+              BVariable.setVarKind(v, VariableKind.PARAMETER(NONE()));
+              BVariable.removePartner(v, BackendInfo.setVarPre);
+            end for;
+          then varData;
+          else bdae.varData;
+        end match;
       then bdae;
       else bdae;
     end match;
@@ -420,12 +466,17 @@ public
     bdae := match bdae
       local
         EqData eqData;
+        Pointer<list<Pointer<Variable>>> acc_discrete_states = Pointer.create({});
+        Pointer<list<Pointer<Variable>>> acc_previous = Pointer.create({});
+
       case MAIN(eqData = eqData as BEquation.EQ_DATA_SIM()) algorithm
         eqData.equations := EquationPointers.map(
           eqData.equations,
           function Equation.simplify(
             name = getInstanceName(),
             indent = "",
+            acc_discrete_states = acc_discrete_states,
+            acc_previous = acc_previous,
             simplifyExp = SimplifyExp.removeStream));
         bdae.eqData := EqData.compress(eqData);
       then bdae;
@@ -485,6 +536,7 @@ protected
     UnorderedSet<VariablePointer> binding_iter_set = UnorderedSet.new(BVariable.hash, BVariable.equalName);
     list<Pointer<Variable>> binding_iter_lst;
     Boolean scalarized = Flags.isSet(Flags.NF_SCALARIZE);
+    list<Pointer<Variable>> forced_states = {};
   algorithm
     vars := List.flatten(list(Variable.expandChildren(v) for v in varList));
 
@@ -505,6 +557,9 @@ protected
       lowVar := Pointer.access(lowVar_ptr);
       variables := VariablePointers.add(lowVar_ptr, variables);
       () := match lowVar.backendinfo.varKind
+        local
+          Boolean natural;
+          Pointer<Variable> der_ptr;
 
         // do nothing for size 0 variables, they get removed
         // Note: record elements need to exist in the full
@@ -522,7 +577,16 @@ protected
           initials_lst := lowVar_ptr :: initials_lst;
         then ();
 
-        case VariableKind.STATE() algorithm
+        case VariableKind.STATE(natural = natural) algorithm
+          if not natural then
+            (_, der_ptr) := BVariable.makeDerVar(BVariable.getVarName(lowVar_ptr));
+            BVariable.setStateDerivativeVar(lowVar_ptr, der_ptr);
+            derivatives_lst := der_ptr :: derivatives_lst;
+            unknowns_lst := der_ptr :: unknowns_lst;
+            initials_lst := der_ptr :: initials_lst;
+            forced_states := lowVar_ptr :: forced_states;
+          end if;
+
           states_lst := lowVar_ptr :: states_lst;
           knowns_lst := lowVar_ptr :: knowns_lst;
           initials_lst := lowVar_ptr :: initials_lst;
@@ -617,7 +681,7 @@ protected
     artificials     := VariablePointers.addList(binding_iter_lst, artificials);
 
     // lower the component references properly
-    variables       := VariablePointers.map(variables, function Variable.mapExp(fn = function lowerComponentReferenceExp(variables = variables)));
+    variables       := VariablePointers.map(variables, function Variable.mapExp(fn = function lowerComponentReferenceExp(variables = variables, complete = true)));
     variables       := VariablePointers.map(variables, function Variable.applyToType(func = function Type.applyToDims(func = function lowerDimension(variables = variables))));
 
     /* lower the records to add children */
@@ -626,7 +690,17 @@ protected
     /* create variable data */
     variableData := BVariable.VAR_DATA_SIM(variables, unknowns, knowns, initials, auxiliaries, aliasVars, nonTrivialAlias,
                       derivatives, algebraics, discretes, discrete_states, clocked_states, previous, clocks,
-                      states, inputs, resizables, parameters, constants, records, external_objects, artificials);
+                      states, inputs, resizables, parameters, constants, records, external_objects, artificials,
+                      UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual));
+
+    if Flags.isSet(Flags.DUMP_STATESELECTION_INFO) then
+      print(StringUtil.headline_4("[stateselection] (" + intString(listLength(forced_states)) + ") Forced states by StateSelect.ALWAYS:"));
+      if listEmpty(forced_states) then
+        print("\t<no states>\n\n");
+      else
+        print(List.toString(forced_states, BVariable.pointerToString, "", "\t", "\n\t", "\n") + "\n");
+      end if;
+    end if;
   end lowerVariableData;
 
   function lowerVariable
@@ -644,7 +718,7 @@ protected
       // only change varKind if unset (Iterators are set before)
       var.backendinfo := match var.backendinfo
         case BackendInfo.BACKEND_INFO(varKind = VariableKind.FRONTEND_DUMMY()) algorithm
-          (varKind, attributes) := lowerVariableKind(Variable.variability(var), attributes, var.ty);
+          (varKind, attributes) := lowerVariableKind(var, attributes, var.ty);
         then BackendInfo.BACKEND_INFO(varKind, attributes, annotations, NONE(), NONE(), NONE(), NONE());
         else BackendInfo.setAttributes(var.backendinfo, attributes, annotations);
       end match;
@@ -664,10 +738,29 @@ protected
     "ToDo: Merge this part from old backend conversion:
       /* Consider toplevel inputs as known unless they are protected. Ticket #5591 */
       false := DAEUtil.topLevelInput(inComponentRef, inVarDirection, inConnectorType, protection);"
-    input Prefixes.Variability variability;
+    input Variable var;
     output VariableKind varKind;
     input output VariableAttributes attributes;
     input Type ty;
+  protected
+    Prefixes.Variability min_var, max_var, variability = Variable.variability(var);
+    function lowerRecordKind
+      input list<Variable> children;
+      output Prefixes.Variability min_var = NFPrefixes.Variability.CONTINUOUS;
+      output Prefixes.Variability max_var = NFPrefixes.Variability.CONSTANT;
+    protected
+      Prefixes.Variability tmp_min_var, tmp_max_var;
+    algorithm
+      for child in children loop
+        (tmp_min_var, tmp_max_var) := match child.ty
+          case Type.COMPLEX()                           then lowerRecordKind(child.children);
+          case Type.ARRAY(elementType = Type.COMPLEX()) then lowerRecordKind(child.children);
+          else (Variable.variability(child), Variable.variability(child));
+        end match;
+        min_var := if tmp_min_var < min_var then tmp_min_var else min_var;
+        max_var := if tmp_max_var > max_var then tmp_max_var else max_var;
+      end for;
+    end lowerRecordKind;
   algorithm
     varKind := match(variability, attributes, ty)
       local
@@ -688,8 +781,12 @@ protected
       then VariableKind.EXTOBJ(Class.constrainingClassPath(elemTy.cls));
 
       // add children pointers for records afterwards, record is considered known if it is of "less" then discrete variability
-      case (_, _, Type.COMPLEX())                                     then VariableKind.RECORD({}, variability < NFPrefixes.Variability.DISCRETE);
-      case (_, _, Type.ARRAY(elementType = Type.COMPLEX()))           then VariableKind.RECORD({}, variability < NFPrefixes.Variability.DISCRETE);
+      case (_, _, Type.COMPLEX()) algorithm
+        (min_var, max_var) := lowerRecordKind(var.children);
+      then VariableKind.RECORD({}, min_var, max_var);
+      case (_, _, Type.ARRAY(elementType = Type.COMPLEX())) algorithm
+        (min_var, max_var) := lowerRecordKind(var.children);
+      then VariableKind.RECORD({}, min_var, max_var);
 
       case (NFPrefixes.Variability.CONTINUOUS, _, Type.BOOLEAN())     then VariableKind.DISCRETE();
       case (NFPrefixes.Variability.CONTINUOUS, _, Type.INTEGER())     then VariableKind.DISCRETE();
@@ -844,6 +941,7 @@ protected
   function lowerEquation
     input FEquation frontend_equation                 "Original Frontend equation.";
     input Boolean init                                "True if an initial equation should be created.";
+    input Boolean in_for = false;
     output list<Pointer<Equation>> backend_equations  "Resulting Backend equations.";
   algorithm
     backend_equations := match frontend_equation
@@ -884,7 +982,7 @@ protected
           // E.g.: DISCRETE, EvalStages
           iterator := ComponentRef.fromNode(frontend_equation.iterator, Type.INTEGER(), {}, NFComponentRef.Origin.ITERATOR);
           for eq in frontend_equation.body loop
-            for body_elem_ptr in lowerEquation(eq, init) loop
+            for body_elem_ptr in lowerEquation(eq, init, true) loop
               body_elem := Pointer.access(body_elem_ptr);
               new_body := match body_elem
                 case Equation.IF_EQUATION() algorithm
@@ -910,7 +1008,7 @@ protected
             // merge iterators of each for equation instead of having nested loops (for {i in 1:10, j in 1:3, k in 1:5})
             body_elem := Equation.mergeIterators(body_elem);
             // inline if size 1
-            body_elem := Inline.inlineForEquation(body_elem);
+            body_elem := Equation.simplify(body_elem);
 
             Pointer.update(body_elem_ptr, body_elem);
             result := body_elem_ptr :: result;
@@ -924,7 +1022,7 @@ protected
       then result;
 
       // if equation
-      case FEquation.IF() then lowerIfEquation(frontend_equation, init);
+      case FEquation.IF() then lowerIfEquation(frontend_equation, init, in_for);
 
       // When equation cases
       case FEquation.WHEN()   then lowerWhenEquation(frontend_equation, init);
@@ -955,6 +1053,7 @@ protected
   function lowerIfEquation
     input FEquation frontend_equation;
     input Boolean init;
+    input Boolean in_for;
     output list<Pointer<Equation>> backend_equations;
   algorithm
     backend_equations := match frontend_equation
@@ -963,11 +1062,15 @@ protected
         DAE.ElementSource source;
         IfEquationBody ifEqBody;
         list<IfEquationBody> bodies;
-        EquationAttributes attr;
 
       case FEquation.IF(branches = branches, source = source) algorithm
-        attr      := EquationAttributes.default(EquationKind.CONTINUOUS, init);
-        ifEqBody  := lowerIfEquationBody(branches, init);
+        try
+          ifEqBody  := lowerIfEquationBody(branches, init, in_for or FEquation.sizeOf(frontend_equation) == 0);
+        else
+          Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for:\n" + FEquation.toString(frontend_equation)});
+          fail();
+        end try;
+
         if Expression.isEnd(ifEqBody.condition) then
           // if the condition is end from the start, there is no alternatives.
           // remove surrounding if structure and return body equations
@@ -989,6 +1092,7 @@ protected
   function lowerIfEquationBody
     input list<FEquation.Branch> branches;
     input Boolean init;
+    input Boolean allow_imbalance;
     output IfEquationBody ifEq;
   algorithm
     ifEq := match branches
@@ -1011,12 +1115,12 @@ protected
           elseif Expression.isFalse(condition) then
             // discard a branch and continue with the rest if a condition is
             // found to be false, because it can never be reached.
-            result := lowerIfEquationBody(rest, init);
+            result := lowerIfEquationBody(rest, init, allow_imbalance);
           else
-            if listEmpty(rest) and init then
+            if listEmpty(rest) and (init or allow_imbalance) then
               result := BEquation.IF_EQUATION_BODY(condition, eqns, NONE());
             else
-              result := BEquation.IF_EQUATION_BODY(condition, eqns, SOME(lowerIfEquationBody(rest, init)));
+              result := BEquation.IF_EQUATION_BODY(condition, eqns, SOME(lowerIfEquationBody(rest, init, allow_imbalance)));
             end if;
           end if;
       then result;
@@ -1024,10 +1128,8 @@ protected
       // We should never get an empty list here since the last condition has to
       // be TRUE. If-Equations have to have a plain else case for consistency!
       else algorithm
-        Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for:\n"
-          + List.toString(branches, function FEquation.Branch.toString(indent = ""), "", "\t", "\n", "\n")});
+        Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed due to invalid missing else case."});
       then fail();
-
     end match;
   end lowerIfEquationBody;
 
@@ -1243,7 +1345,7 @@ protected
     eq := Pointer.create(Equation.ALGORITHM(size, alg, alg.source, DAE.EXPAND(), attr));
   end lowerAlgorithm;
 
-  protected function lowerEquationAttributes
+  function lowerEquationAttributes
     input Type ty;
     input Boolean init;
     output EquationAttributes attr;
@@ -1257,23 +1359,25 @@ protected
     end if;
   end lowerEquationAttributes;
 
-  function lowerComponentReferences
+  protected function lowerComponentReferences
     input output EquationPointers equations;
     input VariablePointers variables;
   algorithm
-    equations := EquationPointers.mapExp(equations,function lowerComponentReferenceExp(variables = variables), SOME(function lowerComponentReference(variables = variables)));
+    equations := EquationPointers.mapExp(equations, function lowerComponentReferenceExp(variables = variables, complete = true),
+      SOME(function lowerComponentReference(variables = variables, complete = true)));
   end lowerComponentReferences;
 
   public function lowerComponentReferenceExp
     input output Expression exp;
     input VariablePointers variables;
+    input Boolean complete = true       "if false it will not report lowering errors";
   algorithm
     exp := match exp
       local
         Call call;
 
       case Expression.CREF() guard(not ComponentRef.isNameNode(exp.cref))
-      then Expression.CREF(exp.ty, lowerComponentReference(exp.cref, variables));
+      then Expression.CREF(exp.ty, lowerComponentReference(exp.cref, variables, complete));
 
       case Expression.CALL(call = call as Call.TYPED_ARRAY_CONSTRUCTOR()) algorithm
         call.iters := list(Util.applyTuple21(tpl, function lowerInstNode(variables = variables)) for tpl in call.iters);
@@ -1295,18 +1399,19 @@ protected
   public function lowerComponentReference
     input output ComponentRef cref;
     input VariablePointers variables;
+    input Boolean complete = true       "if false it will not report lowering errors";
   protected
     Pointer<Variable> var;
     list<list<Subscript>> subs;
   algorithm
     try
       if not ComponentRef.isWild(cref) then
-        var := VariablePointers.getVarSafe(variables, ComponentRef.stripSubscriptsAll(cref));
+        var := VariablePointers.getVarSafe(variables, ComponentRef.stripSubscriptsAll(cref), complete);
         cref := lowerComponentReferenceInstNode(cref, var);
-        cref := ComponentRef.mapSubscripts(cref, function Subscript.mapExp(func = function lowerComponentReferenceExp(variables = variables)));
+        cref := ComponentRef.mapSubscripts(cref, function Subscript.mapExp(func = function lowerComponentReferenceExp(variables = variables, complete = true)));
       end if;
     else
-      if Flags.isSet(Flags.FAILTRACE) then
+      if Flags.isSet(Flags.FAILTRACE) and complete then
         Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for " + ComponentRef.toString(cref)});
       end if;
     end try;
@@ -1318,7 +1423,7 @@ protected
   algorithm
     dim := match dim
       case Dimension.RESIZABLE() algorithm
-        dim.exp := Expression.map(dim.exp, function lowerComponentReferenceExp(variables = variables));
+        dim.exp := Expression.map(dim.exp, function lowerComponentReferenceExp(variables = variables, complete = true));
       then dim;
 
       else dim;

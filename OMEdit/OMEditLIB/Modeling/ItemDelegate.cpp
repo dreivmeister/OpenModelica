@@ -37,6 +37,7 @@
 #include "Plotting/VariablesWidget.h"
 #include "Simulation/SimulationOutputWidget.h"
 #include "OMS/BusDialog.h"
+#include "OMPlot.h"
 
 #include <QPainter>
 
@@ -334,7 +335,7 @@ QWidget* ItemDelegate::createEditor(QWidget *pParent, const QStyleOptionViewItem
       QComboBox *pComboBox = new QComboBox(pParent);
       pComboBox->setEnabled(!pVariablesTreeItem->getDisplayUnits().isEmpty());
       foreach (QString unit, pVariablesTreeItem->getDisplayUnits()) {
-        pComboBox->addItem(Utilities::convertUnitToSymbol(unit), unit);
+        pComboBox->addItem(OMPlot::Plot::convertUnitToSymbol(unit), unit);
       }
       connect(pComboBox, SIGNAL(currentIndexChanged(int)), SLOT(unitComboBoxChanged(int)));
       return pComboBox;
@@ -386,6 +387,24 @@ void ItemDelegate::setEditorData(QWidget *editor, const QModelIndex &index) cons
     comboBox->setCurrentIndex(currentIndex);
   } else {
     QItemDelegate::setEditorData(editor, index);
+  }
+}
+
+/*!
+ * \brief ItemDelegate::setModelData
+ * Sets the value for display unit in VariablesTreeView.
+ * \param editor
+ * \param model
+ * \param index
+ */
+void ItemDelegate::setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const
+{
+  if (parent() && qobject_cast<VariablesTreeView*>(parent()) && index.column() == 3) {
+    /* The default implementation sends QComboBox currentText instead of data of the current item. */
+    QComboBox* comboBox = static_cast<QComboBox*>(editor);
+    model->setData(index, comboBox->currentData(), Qt::EditRole);
+  } else {
+    QItemDelegate::setModelData(editor, model, index);
   }
 }
 

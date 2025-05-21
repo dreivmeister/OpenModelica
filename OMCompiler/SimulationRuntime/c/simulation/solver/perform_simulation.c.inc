@@ -31,6 +31,7 @@
 #include "solver_main.h"
 #include "events.h"
 #include "dassl.h"
+#include "sym_solver_ssc.h"
 
 #include "../simulation_runtime.h"
 #include "../results/simulation_result.h"
@@ -99,7 +100,8 @@ static fire_timer_t simulationUpdate(DATA* data, threadData_t *threadData, SOLVE
   prefixedName_updateContinuousSystem(data, threadData);
 
   if (solverInfo->solverMethod == S_SYM_SOLVER_SSC) {
-    data->simulationInfo->inlineData->dt = solverInfo->solverStepSize;
+    DATA_SYM_SOLVER_SSC* solverData = (DATA_SYM_SOLVER_SSC*) solverInfo->solverData;
+    data->simulationInfo->inlineData->dt = solverData->solverStepSize;
     //data->callback->symbolicInlineSystems(data, threadData);
   }
 
@@ -270,7 +272,15 @@ static void fmtEmitStep(DATA* data, threadData_t *threadData, MEASURE_TIME* mt, 
   }
 
   /* prevent emit if noEventEmit flag is used, if it's an event */
-  if (!omc_flag[FLAG_NOEVENTEMIT] || !solverInfo->didEventStep) {
+  modelica_boolean do_emit = !(omc_flag[FLAG_NOEVENTEMIT] && solverInfo->didEventStep);
+  /* ...unless equidistant time grid is active and we are at a communication time */
+  if (!do_emit && !omc_flag[FLAG_NOEQUIDISTANT_GRID]) {
+    SIMULATION_INFO *simInfo = data->simulationInfo;
+    double currStepNo = round(simInfo->numSteps * (solverInfo->currentTime - simInfo->startTime)/(simInfo->stopTime - simInfo->startTime));
+    double equidistantTime = currStepNo*(simInfo->stopTime-simInfo->startTime)/simInfo->numSteps + simInfo->startTime;
+    do_emit = (equidistantTime == solverInfo->currentTime) || fabs(equidistantTime - solverInfo->currentTime)/(fabs(equidistantTime) + fabs(solverInfo->currentTime)) < 1e-15;
+  }
+  if (do_emit) {
     sim_result.emit(&sim_result, data, threadData);
   }
 #if !defined(OMC_MINIMAL_RUNTIME)

@@ -209,7 +209,7 @@ public
         else (eqn, false);
       end match;
       // unpack the equation
-      eqn := if Equation.isDummy(eqn) then Pointer.access(List.first(Pointer.access(new_eqns))) else eqn;
+      eqn := if Equation.isDummy(eqn) then Pointer.access(listHead(Pointer.access(new_eqns))) else eqn;
     else
       changed := false;
       if Flags.isSet(Flags.FAILTRACE) then
@@ -217,6 +217,46 @@ public
       end if;
     end try;
   end inlineArrayConstructorSingle;
+
+  function inlineArrayIterator
+    "takes a typical (name, exp) tuple representing (for name in exp loop)
+     and checks if exp already is RANGE(). if not it creates a RANGE() of
+     correct size and maps the ARRAY() expression to that RANGE().
+     returns frame structure used for Iterator.fromFrames()"
+    input tuple<InstNode, Expression> iter;
+    input UnorderedSet<VariablePointer> set "new iterators";
+    output tuple<ComponentRef, Expression, Option<Iterator>> frame;
+  algorithm
+    frame := match iter
+      local
+        InstNode node, node2;
+        Expression range, range2;
+        Iterator map;
+        ComponentRef iter_cref;
+        Pointer<Variable> iter_var;
+
+      // it already is a proper range, use it for the for loop
+      case (node, range as Expression.RANGE()) then (ComponentRef.makeIterator(node, Type.INTEGER()), range, NONE());
+
+      // it has an array as constructor, map it to a range
+      // used to fix #13031
+      case (node, range as Expression.ARRAY()) algorithm
+        node2   := InstNode.newIterator("$" + InstNode.name(node), Type.INTEGER(), sourceInfo());
+        range2  := Expression.makeRange(Expression.INTEGER(1), NONE(), Expression.INTEGER(Type.sizeOf(Expression.typeOf(range))));
+        map     := Iterator.fromFrames({(ComponentRef.makeIterator(node, Type.INTEGER()), range, NONE())});
+
+        // create the new iterator variable
+        iter_cref := ComponentRef.makeIterator(node2, Type.INTEGER());
+        iter_var  := BackendDAE.lowerIterator(iter_cref);
+        iter_cref := BVariable.getVarName(iter_var);
+        UnorderedSet.add(iter_var, set);
+      then (iter_cref, range2, SOME(map));
+
+      else algorithm
+        Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed to inline iterator expression: " + InstNode.toString(Util.tuple21(iter)) + " in " + Expression.toString(Util.tuple22(iter)) + "."});
+      then fail();
+    end match;
+  end inlineArrayIterator;
 
 protected
   function inline extends Module.inlineInterface;
@@ -244,7 +284,7 @@ protected
     // collect new iterators from replaced function bodies
     eqData  := EqData.map(eqData, function BackendDAE.lowerEquationIterators(variables = variables, set = set));
     varData := VarData.addTypedList(varData, UnorderedSet.toList(set), NBVariable.VarData.VarType.ITERATOR);
-    eqData  := EqData.mapExp(eqData, function BackendDAE.lowerComponentReferenceExp(variables = variables));
+    eqData  := EqData.mapExp(eqData, function BackendDAE.lowerComponentReferenceExp(variables = variables, complete = true));
   end inline;
 
   function collectInlineFunctions
@@ -519,7 +559,9 @@ protected
   protected
     list<tuple<ComponentRef, Expression, Option<Iterator>>> frames;
     list<Subscript> subs;
-    Expression cref_exp;
+    Expression cref_exp, new_rhs;
+    UnorderedSet<VariablePointer> local_set = UnorderedSet.new(BVariable.hash, BVariable.equalName);
+    VariablePointers local_it;
     list<Pointer<Equation>> eqns;
   algorithm
     if Flags.isSet(Flags.DUMPBACKENDINLINE) then
@@ -528,52 +570,22 @@ protected
     eqns := Pointer.access(new_eqns);
 
     // inline the iterators
-    frames := list(inlineArrayIterator(iter, set) for iter in iters);
+    frames  := list(inlineArrayIterator(iter, local_set) for iter in iters);
+    _ := UnorderedSet.merge(set, local_set);
 
     // add the iterators to the cref
     subs      := Iterator.normalizedSubscripts(Iterator.fromFrames(frames));
-    //subs      := list(Subscript.INDEX(Expression.CREF(Type.INTEGER(), Util.tuple31(tpl))) for tpl in frames);
     cref_exp  := Expression.fromCref(ComponentRef.mergeSubscripts(subs, cref, true));
-    eqns      := createInlinedEquation(eqns, cref_exp, rhs, attr, Iterator.addFrames(iter, frames), variables, set, index);
+
+    // lower the potentiall new iterators
+    local_it  := VariablePointers.fromList(UnorderedSet.toList(local_set));
+    cref_exp  := Expression.map(cref_exp, function BackendDAE.lowerComponentReferenceExp(variables = local_it, complete = false));
+    new_rhs   := Expression.map(rhs, function BackendDAE.lowerComponentReferenceExp(variables = local_it, complete = false));
+
+    eqns      := createInlinedEquation(eqns, cref_exp, new_rhs, attr, Iterator.addFrames(iter, frames), variables, set, index);
     Pointer.update(new_eqns, eqns);
     eqn := Equation.DUMMY_EQUATION();
   end inlineArrayConstructor;
-
-  function inlineArrayIterator
-    input tuple<InstNode, Expression> iter;
-    input UnorderedSet<VariablePointer> set "new iterators";
-    output tuple<ComponentRef, Expression, Option<Iterator>> frame;
-  algorithm
-    frame := match iter
-      local
-        InstNode node, node2;
-        Expression range, range2;
-        Iterator map;
-        ComponentRef iter_cref;
-        Pointer<Variable> iter_var;
-
-      // it already is a proper range, use it for the for loop
-      case (node, range as Expression.RANGE()) then (ComponentRef.makeIterator(node, Type.INTEGER()), range, NONE());
-
-      // it has an array as constructor, map it to a range
-      // used to fix #13031
-      case (node, range as Expression.ARRAY()) algorithm
-        node2   := InstNode.newIterator("$" + InstNode.name(node), Type.INTEGER(), sourceInfo());
-        range2  := Expression.makeRange(Expression.INTEGER(1), NONE(), Expression.INTEGER(Type.sizeOf(Expression.typeOf(range))));
-        map     := Iterator.fromFrames({(ComponentRef.makeIterator(node, Type.INTEGER()), range, NONE())});
-
-        // create the new iterator variable
-        iter_cref := ComponentRef.makeIterator(node2, Type.INTEGER());
-        iter_var  := BackendDAE.lowerIterator(iter_cref);
-        iter_cref := BVariable.getVarName(iter_var);
-        UnorderedSet.add(iter_var, set);
-      then (iter_cref, range2, SOME(map));
-
-      else algorithm
-        Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed to inline iterator expression: " + InstNode.toString(Util.tuple21(iter)) + " in " + Expression.toString(Util.tuple22(iter)) + "."});
-      then fail();
-    end match;
-  end inlineArrayIterator;
 
   function createInlinedEquation
     "used for inlining record, tuple and array equations.
@@ -614,7 +626,7 @@ protected
    // lower indexed record constructor elements
     exp := Expression.map(exp, inlineRecordConstructorElements);
     // lower the new component references of record attributes
-    exp := Expression.map(exp, function BackendDAE.lowerComponentReferenceExp(variables = variables));
+    exp := Expression.map(exp, function BackendDAE.lowerComponentReferenceExp(variables = variables, complete = true));
   end inlineRecordConstructorExp;
 
   function inlineRecordConstructorElements

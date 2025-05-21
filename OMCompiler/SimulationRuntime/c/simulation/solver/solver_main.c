@@ -219,7 +219,7 @@ int initializeSolverData(DATA* data, threadData_t *threadData, SOLVER_INFO* solv
   solverInfo->currentStepSize = simInfo->stepSize;
   solverInfo->laststep = 0;
   solverInfo->solverRootFinding = 0;
-  solverInfo->solverNoEquidistantGrid = 0;
+  solverInfo->solverNoEquidistantGrid = omc_flag[FLAG_NOEQUIDISTANT_GRID];
   solverInfo->lastdesiredStep = solverInfo->currentTime + solverInfo->currentStepSize;
   solverInfo->eventLst = allocList(eventListAlloc, eventListFree, eventListCopy);
   solverInfo->didEventStep = 0;
@@ -227,16 +227,6 @@ int initializeSolverData(DATA* data, threadData_t *threadData, SOLVER_INFO* solv
   solverInfo->sampleEvents = 0;
   resetSolverStats(&solverInfo->solverStats);
   resetSolverStats(&solverInfo->solverStatsTmp);
-
-  /* if FLAG_NOEQUIDISTANT_GRID is set, choose integrator step method */
-  if (omc_flag[FLAG_NOEQUIDISTANT_GRID])
-  {
-    solverInfo->integratorSteps = 1; /* TRUE */
-  }
-  else
-  {
-    solverInfo->integratorSteps = 0;
-  }
 
   /* Deprecation warnings */
   deprecationWarningGBODE(solverInfo->solverMethod);
@@ -414,6 +404,7 @@ int freeSolverData(DATA* data, SOLVER_INFO* solverInfo)
     break;
   case S_GBODE:
     gbode_freeData(data, solverInfo->solverData);
+    solverInfo->solverData = NULL;
     break;
 #if !defined(OMC_MINIMAL_RUNTIME)
   case S_DASSL:
@@ -478,13 +469,13 @@ int initializeModel(DATA* data, threadData_t *threadData, const char* init_initM
 
   copyStartValuestoInitValues(data);
 
+  data->localData[0]->timeValue = simInfo->startTime;
+
   /* read input vars */
   data->callback->input_function_init(data, threadData);
   externalInputUpdate(data);
   data->callback->input_function_updateStartValues(data, threadData);
   data->callback->input_function(data, threadData);
-
-  data->localData[0]->timeValue = simInfo->startTime;
 
   threadData->currentErrorStage = ERROR_SIMULATION;
   /* try */

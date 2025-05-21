@@ -258,6 +258,7 @@ struct OpenModelicaGeneratedFunctionCallbacks {
   /* Matrix F and H are generated for DataReconciliation*/
   const int INDEX_JAC_F;
   const int INDEX_JAC_H;
+  const int INDEX_JAC_S;
 
   /*
   * These functions initialize specific jacobians.
@@ -270,16 +271,18 @@ struct OpenModelicaGeneratedFunctionCallbacks {
   initialAnalyticalJacobian_func_ptr initialAnalyticJacobianD;
   initialAnalyticalJacobian_func_ptr initialAnalyticJacobianF;
   initialAnalyticalJacobian_func_ptr initialAnalyticJacobianH;
+  initialAnalyticalJacobian_func_ptr initialAnalyticJacobianS;
 
   /*
   * These functions calculate specific jacobian column.
   */
-  analyticalJacobianColumn_func_ptr functionJacA_column;
-  analyticalJacobianColumn_func_ptr functionJacB_column;
-  analyticalJacobianColumn_func_ptr functionJacC_column;
-  analyticalJacobianColumn_func_ptr functionJacD_column;
-  analyticalJacobianColumn_func_ptr functionJacF_column;
-  analyticalJacobianColumn_func_ptr functionJacH_column;
+  jacobianColumn_func_ptr functionJacA_column;
+  jacobianColumn_func_ptr functionJacB_column;
+  jacobianColumn_func_ptr functionJacC_column;
+  jacobianColumn_func_ptr functionJacD_column;
+  jacobianColumn_func_ptr functionJacF_column;
+  jacobianColumn_func_ptr functionJacH_column;
+  jacobianColumn_func_ptr functionJacS_column;
   /*#endif*/
 
   const char *(*linear_model_frame)(void); /* printf format-string with holes for 6 strings */
@@ -298,6 +301,11 @@ struct OpenModelicaGeneratedFunctionCallbacks {
   * a dummy function is added which return -1.
   */
   int (*lagrange)(DATA* data, modelica_real** res, short *, short *);
+
+  /*
+  * This function fills a buffer with all set control variable indices.
+  */
+  int (*getInputVarIndicesInOptimization)(DATA* data, int* input_var_indices);
 
   /*
   * This function is used only for optimization purpose
@@ -373,14 +381,14 @@ struct OpenModelicaGeneratedFunctionCallbacks {
   * FMU continuous partial derivative functions
   */
   initialAnalyticalJacobian_func_ptr initialPartialFMIDER;
-  analyticalJacobianColumn_func_ptr functionJacFMIDER_column;
+  jacobianColumn_func_ptr functionJacFMIDER_column;
   const int INDEX_JAC_FMIDER;
 
   /*
   * FMU partial derivative functions for initilization DAE
   */
   initialAnalyticalJacobian_func_ptr initialPartialFMIDERINIT;
-  analyticalJacobianColumn_func_ptr functionJacFMIDERINIT_column;
+  jacobianColumn_func_ptr functionJacFMIDERINIT_column;
   const int INDEX_JAC_FMIDERINIT;
 };
 

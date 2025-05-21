@@ -1362,7 +1362,7 @@ algorithm
         next_context := InstContext.set(context, NFInstContext.SUBEXPRESSION);
         (e1, ty1, var1, pur1) := typeExp(exp.exp1, next_context, info);
         (e2, ty2, var2, pur2) := typeExp(exp.exp2, next_context, info);
-        (exp, ty) := TypeCheck.checkBinaryOperation(e1, ty1, var1, exp.operator, e2, ty2, var2, context, info);
+        (exp, ty) := TypeCheck.checkBinaryOperation(e1, ty1, var1, exp.operator, e2, ty2, var2, context, info, retype);
       then
         (exp, ty, Prefixes.variabilityMax(var1, var2), Prefixes.purityMin(pur1, pur2));
 
@@ -1447,11 +1447,7 @@ algorithm
 
     case Expression.MULTARY() then typeExp(SimplifyExp.splitMultary(exp), context, info, retype);
 
-    else
-      algorithm
-        Error.assertion(false, getInstanceName() + " got unknown expression: " + Expression.toString(exp), sourceInfo());
-      then
-        fail();
+    else (exp, Expression.typeOf(exp), Expression.variability(exp), Expression.purity(exp));
 
   end match;
 
@@ -1693,6 +1689,7 @@ function typeExpDim
 protected
   Type ty;
   Expression e;
+  InstContext.Type next_context;
 algorithm
   ty := Expression.typeOf(exp);
 
@@ -1706,6 +1703,10 @@ algorithm
     end if;
   end if;
 
+  // Clear any scope flags. For dimensions we only really care about if we're
+  // in a class or function and other flags shouldn't influence the typing.
+  next_context := InstContext.clearExpFlags(context);
+
   // Otherwise we try to type as little as possible of the expression to get
   // the dimension we need, to avoid introducing unnecessary cycles.
   (dim, error) := match exp
@@ -1715,18 +1716,18 @@ algorithm
 
     // A cref, use typeCrefDim to get the dimension.
     case Expression.CREF()
-      then typeCrefDim(exp.cref, dimIndex, context, info);
+      then typeCrefDim(exp.cref, dimIndex, next_context, info);
 
     // Any other expression, type the whole expression and get the dimension
     // from the type.
     else
       algorithm
-        (e, ty, _) := typeExp(exp, context, info);
+        (e, ty, _) := typeExp(exp, next_context, info);
 
         if Type.isConditionalArray(ty) then
           e := Expression.map(e,
-            function evaluateArrayIf(target = Ceval.EvalTarget.new(info, context)));
-          (e, ty, _) := typeExp(e, context, info);
+            function evaluateArrayIf(target = Ceval.EvalTarget.new(info, next_context)));
+          (e, ty, _) := typeExp(e, next_context, info);
         end if;
 
         typedExp := SOME(e);
@@ -2661,6 +2662,14 @@ algorithm
       {"", Expression.toString(tb), Type.toString(tb_ty),
            Expression.toString(fb), Type.toString(fb_ty)}, info);
     fail();
+  end if;
+
+  // Evaluate the if-expression if exactly one branch contains a der call,
+  // since this can affect the number of state variables.
+  if Expression.contains(tb2, function Expression.isCallNamed(name = "der")) <>
+     Expression.contains(fb2, function Expression.isCallNamed(name = "der")) and
+     Flags.getConfigString(Flags.EVALUATE_STRUCTURAL_PARAMETERS) == "all" then
+    Structural.markExp(cond);
   end if;
 
   ifExp := Expression.IF(ty, cond, tb2, fb2);

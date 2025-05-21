@@ -320,11 +320,9 @@ public
     end create;
 
     function merge
-      input output Mode mode1;
+      input Mode mode1;
       input Mode mode2;
-    algorithm
-      mode1.crefs := listAppend(mode1.crefs, mode2.crefs);
-      mode1.scalarize := mode1.scalarize or mode2.scalarize;
+      output Mode oMode = MODE(mode1.eqn_name, listAppend(mode1.crefs, mode2.crefs), mode1.scalarize or mode2.scalarize);
     end merge;
 
     function mergeCreate
@@ -449,7 +447,8 @@ public
       input UnorderedMap<ComponentRef, Integer> eqns_map;
       input EquationPointers eqns;
       input MatrixStrictness st;
-      output Matrix adj = upgrade(EMPTY(MatrixStrictness.FULL), full, vars_map, eqns_map, eqns, st);
+      input Iterator iter = Iterator.EMPTY() "optional iterator the whole system might be surrounded by";
+      output Matrix adj = upgrade(EMPTY(MatrixStrictness.FULL), full, vars_map, eqns_map, eqns, st, iter);
     end fromFull;
 
     function upgrade
@@ -460,6 +459,7 @@ public
       input UnorderedMap<ComponentRef, Integer> eqns_map;
       input EquationPointers eqns;
       input MatrixStrictness st;
+      input Iterator iter = Iterator.EMPTY();
     algorithm
       if Flags.isSet(Flags.BLT_MATRIX_DUMP) then
         print(StringUtil.headline_1("Upgrading from [" + strictnessString(getStrictness(adj)) + "] to [" + strictnessString(st) +"]") + "\n");
@@ -500,7 +500,7 @@ public
                 for index in UnorderedMap.valueList(eqns_map) loop
                   filtered := Solvability.filter(UnorderedSet.toList(occ[index]), sol[index], vars_map, min, max);
                   // upgrade the row and all meta data
-                  upgradeRow(EquationPointers.getEqnAt(eqns, index), index, filtered, dep[index], rep[index], vars_map, vars_map, adj.m, adj.mapping, adj.modes);
+                  upgradeRow(EquationPointers.getEqnAt(eqns, index), index, filtered, dep[index], rep[index], vars_map, vars_map, adj.m, adj.mapping, adj.modes, iter);
                 end for;
                 adj.mT := transposeScalar(adj.m, arrayLength(adj.mapping.var_StA));
                 result := adj;
@@ -511,7 +511,7 @@ public
                     + Solvability.toString(Solvability.fromStrictness(st)) + ". The new matrix will be
                     created from using only the full adjacency matrix.");
                 end if;
-                result := fromFull(full, vars_map, eqns_map, eqns, st);
+                result := fromFull(full, vars_map, eqns_map, eqns, st, iter);
               end if;
             then result;
 
@@ -656,12 +656,12 @@ public
           UnorderedSet<ComponentRef> occ_set;
         case FULL() algorithm
           // 0. enlargen the arrays
-          full.mapping        := Mapping.expand(full.mapping, new_eqns, new_vars);
-          full.equation_names := Array.expandToSize(size, full.equation_names, ComponentRef.EMPTY());
-          full.occurences     := Array.expandToSize(size, full.occurences, UnorderedSet.new(ComponentRef.hash, ComponentRef.isEqual));
-          full.dependencies   := Array.expandToSize(size, full.dependencies, UnorderedMap.new<Dependency>(ComponentRef.hash, ComponentRef.isEqual));
-          full.solvabilities  := Array.expandToSize(size, full.solvabilities, UnorderedMap.new<Solvability>(ComponentRef.hash, ComponentRef.isEqual));
-          full.repetitions    := Array.expandToSize(size, full.repetitions, UnorderedSet.new(ComponentRef.hash, ComponentRef.isEqual));
+          full := FULL(Array.expandToSize(size, full.equation_names, ComponentRef.EMPTY()),
+            Array.expandToSize(size, full.occurences, UnorderedSet.new(ComponentRef.hash, ComponentRef.isEqual)),
+            Array.expandToSize(size, full.dependencies, UnorderedMap.new<Dependency>(ComponentRef.hash, ComponentRef.isEqual)),
+            Array.expandToSize(size, full.solvabilities, UnorderedMap.new<Solvability>(ComponentRef.hash, ComponentRef.isEqual)),
+            Array.expandToSize(size, full.repetitions, UnorderedSet.new(ComponentRef.hash, ComponentRef.isEqual)),
+            Mapping.expand(full.mapping, new_eqns, new_vars));
 
           // I. update all old equations with the new variables
           if not UnorderedMap.isEmpty(vn) then
@@ -1167,12 +1167,16 @@ public
       input array<list<Integer>> m;
       input Mapping mapping;
       input UnorderedMap<Mode.Key, Mode> modes;
+      input Iterator iter_ = Iterator.EMPTY();
     protected
       Integer eqn_scal_idx, eqn_size;
       list<Integer> row;
       Equation eqn = Pointer.access(eqn_ptr);
       Iterator iter = Equation.getForIterator(eqn);
       Type ty = Equation.getType(eqn, true);
+      list<ComponentRef> names;
+      list<Expression> ranges;
+      list<Option<Iterator>> maps;
     algorithm
       try
         // don't do this for if equations as soon as we properly split them
@@ -1185,6 +1189,13 @@ public
           end for;
         else
           // todo: if, when single equation (needs to be updated for if)
+
+          // add the optional surrounding iterator frames
+          if not Iterator.isEmpty(iter_) then
+            (names, ranges, maps) := Iterator.getFrames(iter_);
+            iter := Iterator.addFrames(iter, List.zip3(names, ranges, maps));
+          end if;
+
           Slice.upgradeRow(Equation.getEqnName(eqn_ptr), eqn_arr_idx, iter, ty, dependencies, dep, rep, map, fullmap, m, mapping, modes);
         end if;
       else
@@ -1622,7 +1633,7 @@ public
         Dependency.addListFull(inputs, 0, dep_map, rep_set);
         Dependency.addListFull(outputs, 0, dep_map, rep_set);
         // make inputs unsolvable and outputs solvable (maybe check if algorithm can be reversed)
-        Solvability.updateList(inputs, Solvability.UNSOLVABLE(), sol_map);
+        Solvability.updateList(inputs, Solvability.IMPLICIT(), sol_map);
         Solvability.updateList(outputs, Solvability.EXPLICIT_LINEAR(NONE(), NONE()), sol_map);
       then UnorderedSet.fromList(listAppend(inputs, outputs), ComponentRef.hash, ComponentRef.isEqual);
 

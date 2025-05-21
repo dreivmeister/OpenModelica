@@ -62,6 +62,8 @@ simulationnewbackend-basics.log \
 simulationnewbackend-differentation.log \
 simulationnewbackend-event_handling.log \
 simulationnewbackend-functions.log \
+simulationnewbackend-index_reduction.log \
+simulationnewbackend-ModelicaTest.log \
 simulationnewbackend-msl.log \
 simulationnewbackend-records.log \
 simulationnewbackend-ScalableTestsuite.log \
@@ -358,6 +360,12 @@ simulationnewbackend-event_handling.log: omc-diff
 	@echo $@ done
 simulationnewbackend-functions.log: omc-diff
 	$(MAKE) -C simulation/modelica/NBackend/functions/ -f Makefile test > $@
+	@echo $@ done
+simulationnewbackend-index_reduction.log: omc-diff
+	$(MAKE) -C simulation/modelica/NBackend/index_reduction/ -f Makefile test > $@
+	@echo $@ done
+simulationnewbackend-ModelicaTest.log: omc-diff
+	$(MAKE) -C simulation/modelica/NBackend/ModelicaTest/ -f Makefile test > $@
 	@echo $@ done
 simulationnewbackend-msl.log: omc-diff
 	$(MAKE) -C simulation/modelica/NBackend/msl/ -f Makefile test > $@
