@@ -252,7 +252,8 @@ constant list<Flags.DebugFlag> allDebugFlags = {
   Flags.DUMP_EVENTS,
   Flags.DUMP_RESIZABLE,
   Flags.DUMP_SOLVE,
-  Flags.FORCE_SCALARIZE
+  Flags.FORCE_SCALARIZE,
+  Flags.ADJ_SYMJAC_FMI30
 };
 
 protected

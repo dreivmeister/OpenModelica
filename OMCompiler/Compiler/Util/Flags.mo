@@ -555,6 +555,8 @@ constant DebugFlag DUMP_SOLVE = DEBUG_FLAG(195, "dumpSolve", false,
   Gettext.gettext("Dumps information about equation solving."));
 constant DebugFlag FORCE_SCALARIZE = DEBUG_FLAG(196, "forceScalarize", false,
   Gettext.gettext("Forces scalarization to be done when it would normally be automatically disabled."));
+constant DebugFlag ADJ_SYMJAC_FMI30 = DEBUG_FLAG(197, "enableAdjointDerivatives", false,
+  Gettext.gettext("Turns on generation of adjoint Jacobian equations for FMI3. Requires DIS_SYMJAC_FMI20 to be disabled."));
 
 public
 // CONFIGURATION FLAGS
