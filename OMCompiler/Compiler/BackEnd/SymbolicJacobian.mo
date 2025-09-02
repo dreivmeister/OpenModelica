@@ -1972,6 +1972,133 @@ else
 end try;
 end createFMIModelDerivativesForInitialization;
 
+public function transposeSymbolicJacobianByCoefficients
+  "Transpose a generic symbolic jacobian by parsing coefficients.
+   Uses BackendVarTransform.replaceExp to isolate coefficients by setting all
+   seeds to 0 except the inspected one to 1. Returns a new SYMBOLIC_JACOBIAN
+   with name appended by 'T'."
+  input BackendDAE.SymbolicJacobian inSj;
+  output BackendDAE.SymbolicJacobian outSj;
+protected
+  BackendDAE.BackendDAE jacDAE;
+  String name;
+  list<BackendDAE.Var> diffVars, diffedVars, allDiffedVars;
+  list<DAE.ComponentRef> dependencies;
+  BackendDAE.EqSystem syst;
+  BackendDAE.EquationArray eqArr;
+  Integer nRows, nSeeds;
+  list<DAE.Exp> rowExprs = {};
+  list<list<DAE.Exp>> coeffMatrixRows = {};
+  list<DAE.ComponentRef> seedCrefList;
+  Integer r, s;
+  BackendVarTransform.VariableReplacements rep;
+  DAE.Exp coeffExp, rowExp, newExp;
+  list<DAE.Exp> rowCoeffs, tmpTerms;
+  BackendDAE.Equation origEq, newEq;
+  list<BackendDAE.Equation> newEqList = {};
+  BackendDAE.EqSystem newSyst;
+  BackendDAE.BackendDAE newJacDAE;
+algorithm
+  // unpack input
+  (jacDAE, name, diffVars, diffedVars, allDiffedVars, dependencies) := inSj;
+
+  // pick first equation-system (directional derivative system)
+  syst :: _ := jacDAE.eqs;
+  eqArr := syst.orderedEqs;
+
+  // build seed cref list from diffVars using the same naming as createSeedVars
+  seedCrefList := list(Differentiate.createSeedCrefName(BackendVariable.varCref(v), name) for v in diffVars);
+  nSeeds := listLength(seedCrefList);
+
+  // collect residual expression for every original equation (ordered)
+  nRows := BackendEquation.equationArraySize(eqArr);
+  for r in 1:nRows loop
+    origEq := BackendEquation.get(eqArr, r);
+    // create residual expression lhs - rhs (robust across equation kinds)
+    rowExp := BackendEquation.createResidualExp(origEq);
+    rowExprs := rowExprs :: rowExp;
+  end for;
+  rowExprs := listReverse(rowExprs);
+
+  // For each row, compute coefficient for each seed by replacements
+  for rowExp in rowExprs loop
+    rowCoeffs := {};
+    for s in 1:nSeeds loop
+      // prepare replacements: seed_s -> 1, others -> 0
+      // basically go through all unit vectors
+      rep := BackendVarTransform.emptyReplacements();
+      for r in 1:nSeeds loop
+        if intEq(r,s) then
+          rep := BackendVarTransform.addReplacement(rep, listGet(seedCrefList, r), DAE.RCONST(1.0), NONE());
+        else
+          rep := BackendVarTransform.addReplacement(rep, listGet(seedCrefList, r), DAE.RCONST(0.0), NONE());
+        end if;
+      end for;
+      // apply replacements to isolate coefficient
+      // set the current unit vector seed in the expression
+      coeffExp := BackendVarTransform.replaceExp(rowExp, rep, NONE());
+      // and simplify to isolate the coefficient of the single seed which equals 1
+      (coeffExp, _) := ExpressionSimplify.simplify(coeffExp);
+      rowCoeffs := rowCoeffs :: coeffExp;
+    end for;
+    // rowCoeffs currently reversed due to consing
+    rowCoeffs := listReverse(rowCoeffs);
+    coeffMatrixRows := coeffMatrixRows :: rowCoeffs;
+  end for;
+  coeffMatrixRows := listReverse(coeffMatrixRows); // now index 1..nRows
+
+  // Build new equations: keep same LHS, new RHS = sum_{j=1..nSeeds} coeffMatrixRows[jRow][i] * seed_j
+  // (missing coefficients are treated as zero)
+  for i in 1:nRows loop
+    origEq := BackendEquation.get(eqArr, i);
+    tmpTerms := {};
+    for s in 1:nSeeds loop
+      // obtain coefficient: original coefficient at row s, column i
+      if s <= listLength(coeffMatrixRows) then
+        rowCoeffs := listGet(coeffMatrixRows, s);
+        if i <= listLength(rowCoeffs) then
+          coeffExp := listGet(rowCoeffs, i);
+        else
+          coeffExp := DAE.RCONST(0.0);
+        end if;
+      else
+        coeffExp := DAE.RCONST(0.0);
+      end if;
+      // skip zero coefficients
+      if not Expression.isZero(coeffExp) then
+        // multiply coefficient with corresponding seed variable
+        tmpTerms := DAE.BINARY(coeffExp, DAE.MUL(DAE.T_REAL_DEFAULT), Expression.crefExp(listGet(seedCrefList, s))) :: tmpTerms;
+      end if;
+    end for;
+
+    if listEmpty(tmpTerms) then
+      newExp := DAE.RCONST(0.0);
+    else
+      newExp := List.fold1(tmpTerms, Expression.makeBinaryExp, DAE.ADD(DAE.T_REAL_DEFAULT), DAE.RCONST(0.0));
+      (newExp, _) := ExpressionSimplify.simplify(newExp);
+    end if;
+
+    // preserve equation kind and source/attr when possible
+    newEq := match(origEq)
+      case BackendDAE.EQUATION(exp=lhs, scalar=rhs, source=src, attr=attr) then BackendDAE.EQUATION(lhs, newExp, src, attr);
+      case BackendDAE.RESIDUAL_EQUATION(exp=e, source=src, attr=attr) then BackendDAE.RESIDUAL_EQUATION(newExp, src, attr);
+      case BackendDAE.SOLVED_EQUATION(componentRef=cr, exp=e, source=src, attr=attr) then BackendDAE.SOLVED_EQUATION(cr, newExp, src, attr);
+      else BackendDAE.RESIDUAL_EQUATION(newExp, DAE.emptyElementSource, BackendDAE.EQ_ATTR_DEFAULT_UNKNOWN);
+    end match;
+    newEqList := newEq :: newEqList;
+  end for;
+
+  newEqList := listReverse(newEqList);
+  // replace ordered equations in system
+  newSyst := syst;
+  newSyst := BackendDAEUtil.setEqSystEqs(newSyst, BackendEquation.listEquation(newEqList));
+
+  // keep variables and shared as before (only RHS changed)
+  newJacDAE := BackendDAE.DAE({newSyst}, jacDAE.shared);
+
+  outSj := (newJacDAE, name + "T", diffVars, diffedVars, allDiffedVars, dependencies);
+end transposeSymbolicJacobianByCoefficients;
+
 protected function createLinearModelMatrices "This function creates the linear model matrices column-wise
   author: wbraun"
   input BackendDAE.BackendDAE inBackendDAE;
