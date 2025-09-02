@@ -1816,6 +1816,11 @@ try
     end if;
     outJacobianMatrices := (outJacobian, sparsePattern, sparseColoring, nonlinearPattern)::outJacobianMatrices;
     outFunctionTree := DAE.AvlTreePathFunction.join(inBackendDAE.shared.functionTree, outFunctionTree);
+
+    if Flags.isSet(Flags.ADJ_SYMJAC_FMI30) then
+      // Generate adjoint Jacobian equations  
+      adjointJacobian := transposeSymbolicJacobianByCoefficients(outJacobian);
+    end if;
   end if;
 else
   Error.addInternalError("function createFMIModelDerivatives failed", sourceInfo());
@@ -2095,6 +2100,10 @@ algorithm
 
   // keep variables and shared as before (only RHS changed)
   newJacDAE := BackendDAE.DAE({newSyst}, jacDAE.shared);
+
+  if Flags.isSet(Flags.JAC_DUMP) then
+    BackendDump.bltdump("Transposed Symbolic Jacobian", newJacDAE);
+  end if;
 
   outSj := (newJacDAE, name + "T", diffVars, diffedVars, allDiffedVars, dependencies);
 end transposeSymbolicJacobianByCoefficients;
