@@ -1821,8 +1821,12 @@ try
     if Flags.isSet(Flags.ADJ_SYMJAC_FMI30) then
       // Generate adjoint Jacobian equations  
       adjointJacobian := transposeSymbolicJacobianByCoefficients(Util.getOption(outJacobian));
-      // (adjointJacobian, _, adjointSparsePattern,adjointSparseColoring,_) := generateGenericJacobian(backendDAE,depVars,statesarr,inputvarsarr,paramvarsarr,BackendVariable.listVar1(indepVars),varlst,"FMIDER", Flags.isSet(Flags.DIS_SYMJAC_FMI20));
-      // BackendDump.symJacString((adjointJacobian, adjointSparsePattern,adjointSparseColoring));
+      // transpose sparsePattern, sparseColoring, nonlinearPattern
+      adjointSparsePattern := transposeSparsePattern(sparsePattern);
+      adjointSparseColoring := transposeSparseColoring(sparseColoring);
+      adjointNonlinearPattern := transposeNonlinearPattern(nonlinearPattern);
+      outJacobianMatrices := (SOME(adjointJacobian), adjointSparsePattern, adjointSparseColoring, adjointNonlinearPattern)::outJacobianMatrices;
+      // and something to the functionTree
     end if;
   end if;
 else
@@ -1980,11 +1984,13 @@ else
 end try;
 end createFMIModelDerivativesForInitialization;
 
+
+// should it be protected?
 public function transposeSymbolicJacobianByCoefficients
   "Transpose a generic symbolic jacobian by parsing coefficients.
    Uses BackendVarTransform.replaceExp to isolate coefficients by setting all
-   seeds to 0 except the inspected one to 1. Returns a new SYMBOLIC_JACOBIAN
-   with name appended by 'T'."
+   seeds to 0 except the inspected one to 1. Returns a new SymbolicJacobian
+   with name prepended by 'ADJ' for Adjoint."
   input BackendDAE.SymbolicJacobian inSj;
   output BackendDAE.SymbolicJacobian outSj;
 protected
@@ -2021,8 +2027,6 @@ algorithm
   print("dependencies\n");
   BackendDump.debugStrCrefLstStr("", dependencies, "\n", "n");
 
-
-
   // they should be passed from above
   dummyVarName := ("dummyVar" + matrixName);
   x := DAE.CREF_IDENT(dummyVarName,DAE.T_REAL_DEFAULT,{});
@@ -2053,8 +2057,11 @@ algorithm
     rowExp := BackendEquation.createResidualExp(origEq);
     rowExprs := rowExp :: rowExprs;
   end for;
-  rowExprs := listReverse(rowExprs); // only the left hand sides (only an expression), not an equation
+  rowExprs := listReverse(rowExprs); // i think this is intended to keep order 
   BackendDump.debugStrExpLstStr("rowExprs residual \n", rowExprs, "\n", "\n");
+
+  // is it possible to do something similar to?:
+  // rowExprs := list(BackendEquation.createResidualExp(eq) for eq in eqArr);
 
   // For each row, compute coefficient for each seed by replacements
   print("results of replaced seeds in all expressions\n");
@@ -2087,14 +2094,10 @@ algorithm
       BackendDump.debugExpStr(coeffExp, "\n");
       rowCoeffs := coeffExp :: rowCoeffs;
     end for;
-    // rowCoeffs currently reversed due to consing
-    // rowCoeffs := listReverse(rowCoeffs);
-    // coeffMatrixRows := rowCoeffs :: coeffMatrixRows;
-    rowCoeffs := listReverse(rowCoeffs);
     coeffMatrixRows := rowCoeffs :: coeffMatrixRows;
   end for;
-  coeffMatrixRows := listReverse(coeffMatrixRows); // now index 1..nRows
 
+  // transpose
   if listLength(coeffMatrixRows) > 0 and nSeeds > 0 then
     transposed := {};
     nRows_ := listLength(coeffMatrixRows);
@@ -2114,7 +2117,6 @@ algorithm
     end for;
     coeffMatrixRows := listReverse(transposed); // seed-major: coeffMatrixRows[seed][row]
   end if;
-
 
   print("coeffMatrixRows (each row: coefficients for seeds):\n");
   for i in 1:listLength(coeffMatrixRows) loop
@@ -2172,7 +2174,6 @@ algorithm
     newEqList := newEq :: newEqList;
   end for;
 
-  //newEqList := listReverse(newEqList);
   // replace ordered equations in system
   newSyst := syst;
   newSyst := BackendDAEUtil.setEqSystEqs(newSyst, BackendEquation.listEquation(newEqList));
@@ -2184,7 +2185,7 @@ algorithm
     BackendDump.bltdump("Transposed Symbolic Jacobian", newJacDAE);
   end if;
 
-  outSj := (newJacDAE, matrixName + "T", diffVars, diffedVars, allDiffedVars, dependencies);
+  outSj := (newJacDAE, "ADJ" + matrixName, diffVars, diffedVars, allDiffedVars, dependencies);
 end transposeSymbolicJacobianByCoefficients;
 
 protected function createLinearModelMatrices "This function creates the linear model matrices column-wise
