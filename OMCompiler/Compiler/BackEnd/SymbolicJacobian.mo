@@ -1743,6 +1743,7 @@ protected
   BackendDAE.BackendDAE backendDAE,emptyBDAE;
   BackendDAE.EqSystem eqSyst;
   Option<BackendDAE.SymbolicJacobian> outJacobian;
+  BackendDAE.SymbolicJacobian adjointJacobian;
 
   list<BackendDAE.Var> varlst, knvarlst, states, inputvars, outputvars, paramvars, indepVars, depVars;
 
@@ -1819,7 +1820,9 @@ try
 
     if Flags.isSet(Flags.ADJ_SYMJAC_FMI30) then
       // Generate adjoint Jacobian equations  
-      adjointJacobian := transposeSymbolicJacobianByCoefficients(outJacobian);
+      adjointJacobian := transposeSymbolicJacobianByCoefficients(Util.getOption(outJacobian));
+      // (adjointJacobian, _, adjointSparsePattern,adjointSparseColoring,_) := generateGenericJacobian(backendDAE,depVars,statesarr,inputvarsarr,paramvarsarr,BackendVariable.listVar1(indepVars),varlst,"FMIDER", Flags.isSet(Flags.DIS_SYMJAC_FMI20));
+      // BackendDump.symJacString((adjointJacobian, adjointSparsePattern,adjointSparseColoring));
     end if;
   end if;
 else
@@ -1986,46 +1989,75 @@ public function transposeSymbolicJacobianByCoefficients
   output BackendDAE.SymbolicJacobian outSj;
 protected
   BackendDAE.BackendDAE jacDAE;
-  String name;
-  list<BackendDAE.Var> diffVars, diffedVars, allDiffedVars;
+  String matrixName, dummyVarName;
+  list<BackendDAE.Var> diffVars, diffedVars, allDiffedVars, derivedVariables;
   list<DAE.ComponentRef> dependencies;
   BackendDAE.EqSystem syst;
   BackendDAE.EquationArray eqArr;
-  Integer nRows, nSeeds;
+  Integer nRows, nSeeds, nRows_, nCols_;
   list<DAE.Exp> rowExprs = {};
-  list<list<DAE.Exp>> coeffMatrixRows = {};
+  list<list<DAE.Exp>> coeffMatrixRows = {}, transposed = {};
+  DAE.ComponentRef x, cref;
   list<DAE.ComponentRef> seedCrefList;
   Integer r, s;
   BackendVarTransform.VariableReplacements rep;
   DAE.Exp coeffExp, rowExp, newExp;
-  list<DAE.Exp> rowCoeffs, tmpTerms;
+  list<DAE.Exp> rowCoeffs, tmpTerms, col;
   BackendDAE.Equation origEq, newEq;
   list<BackendDAE.Equation> newEqList = {};
   BackendDAE.EqSystem newSyst;
   BackendDAE.BackendDAE newJacDAE;
 algorithm
   // unpack input
-  (jacDAE, name, diffVars, diffedVars, allDiffedVars, dependencies) := inSj;
+  (jacDAE, matrixName, diffVars, diffedVars, allDiffedVars, dependencies) := inSj;
+
+  BackendDump.bltdump("input jac dae", jacDAE);
+  print("diffVars\n");
+  BackendDump.printVarList(diffVars);
+  print("diffedVars\n");
+  BackendDump.printVarList(diffedVars);
+  print("allDiffedVars\n");
+  BackendDump.printVarList(allDiffedVars);
+  print("dependencies\n");
+  BackendDump.debugStrCrefLstStr("", dependencies, "\n", "n");
+
+
+
+  // they should be passed from above
+  dummyVarName := ("dummyVar" + matrixName);
+  x := DAE.CREF_IDENT(dummyVarName,DAE.T_REAL_DEFAULT,{});
+  derivedVariables := createAllDiffedVars(diffVars, x, BackendVariable.listVar1(diffedVars), matrixName);
+  print("derivedVariables\n");
+  BackendDump.printVarList(derivedVariables);
 
   // pick first equation-system (directional derivative system)
   syst :: _ := jacDAE.eqs;
   eqArr := syst.orderedEqs;
 
+  print("eqArr\n");
+  BackendDump.printEquationArray(eqArr);
+
   // build seed cref list from diffVars using the same naming as createSeedVars
-  seedCrefList := list(Differentiate.createSeedCrefName(BackendVariable.varCref(v), name) for v in diffVars);
-  nSeeds := listLength(seedCrefList);
+  // x.SeedFMIDER, y.SeedFMIDER
+  seedCrefList := list(Differentiate.createSeedCrefName(BackendVariable.varCref(v), matrixName) for v in diffVars);
+  print("seedCrefList\n" + stringDelimitList(List.map(seedCrefList, ComponentReference.printComponentRefStr), "\n") + "\n");
+  nSeeds := listLength(seedCrefList); // 2
 
   // collect residual expression for every original equation (ordered)
-  nRows := BackendEquation.equationArraySize(eqArr);
+  nRows := BackendEquation.equationArraySize(eqArr); // 2
+  print("eq Rows\n");
   for r in 1:nRows loop
     origEq := BackendEquation.get(eqArr, r);
+    BackendDump.debugStrEqnStr(intString(r), origEq, "\n");
     // create residual expression lhs - rhs (robust across equation kinds)
     rowExp := BackendEquation.createResidualExp(origEq);
-    rowExprs := rowExprs :: rowExp;
+    rowExprs := rowExp :: rowExprs;
   end for;
-  rowExprs := listReverse(rowExprs);
+  rowExprs := listReverse(rowExprs); // only the left hand sides (only an expression), not an equation
+  BackendDump.debugStrExpLstStr("rowExprs residual \n", rowExprs, "\n", "\n");
 
   // For each row, compute coefficient for each seed by replacements
+  print("results of replaced seeds in all expressions\n");
   for rowExp in rowExprs loop
     rowCoeffs := {};
     for s in 1:nSeeds loop
@@ -2039,33 +2071,66 @@ algorithm
           rep := BackendVarTransform.addReplacement(rep, listGet(seedCrefList, r), DAE.RCONST(0.0), NONE());
         end if;
       end for;
+
+      // replace der terms
+      for dv in derivedVariables loop
+        // dv is a BackendDAE.Var -> get its ComponentRef
+        cref := BackendVariable.varCref(dv);
+        rep := BackendVarTransform.addReplacement(rep, cref, DAE.RCONST(0.0), NONE());
+      end for;
+
       // apply replacements to isolate coefficient
       // set the current unit vector seed in the expression
       coeffExp := BackendVarTransform.replaceExp(rowExp, rep, NONE());
       // and simplify to isolate the coefficient of the single seed which equals 1
       (coeffExp, _) := ExpressionSimplify.simplify(coeffExp);
-      rowCoeffs := rowCoeffs :: coeffExp;
+      BackendDump.debugExpStr(coeffExp, "\n");
+      rowCoeffs := coeffExp :: rowCoeffs;
     end for;
     // rowCoeffs currently reversed due to consing
+    // rowCoeffs := listReverse(rowCoeffs);
+    // coeffMatrixRows := rowCoeffs :: coeffMatrixRows;
     rowCoeffs := listReverse(rowCoeffs);
-    coeffMatrixRows := coeffMatrixRows :: rowCoeffs;
+    coeffMatrixRows := rowCoeffs :: coeffMatrixRows;
   end for;
   coeffMatrixRows := listReverse(coeffMatrixRows); // now index 1..nRows
+
+  if listLength(coeffMatrixRows) > 0 and nSeeds > 0 then
+    transposed := {};
+    nRows_ := listLength(coeffMatrixRows);
+    nCols_ := nSeeds;
+    for c in 1:nCols_ loop
+      col := {};
+      for r in 1:nRows_ loop
+        rowCoeffs := listGet(coeffMatrixRows, r);
+        if c <= listLength(rowCoeffs) then
+          col := listGet(rowCoeffs, c) :: col;
+        else
+          col := DAE.RCONST(0.0) :: col;
+        end if;
+      end for;
+      col := listReverse(col); // now col[1] is coefficient for row 1
+      transposed := col :: transposed;
+    end for;
+    coeffMatrixRows := listReverse(transposed); // seed-major: coeffMatrixRows[seed][row]
+  end if;
+
+
+  print("coeffMatrixRows (each row: coefficients for seeds):\n");
+  for i in 1:listLength(coeffMatrixRows) loop
+    rowCoeffs := listGet(coeffMatrixRows, i);
+    print(" row " + intString(i) + ":\n" + stringDelimitList(List.map(rowCoeffs, ExpressionDump.printExpStr), " ") + "\n");
+  end for;
 
   // Build new equations: keep same LHS, new RHS = sum_{j=1..nSeeds} coeffMatrixRows[jRow][i] * seed_j
   // (missing coefficients are treated as zero)
   for i in 1:nRows loop
-    origEq := BackendEquation.get(eqArr, i);
     tmpTerms := {};
     for s in 1:nSeeds loop
-      // obtain coefficient: original coefficient at row s, column i
-      if s <= listLength(coeffMatrixRows) then
-        rowCoeffs := listGet(coeffMatrixRows, s);
-        if i <= listLength(rowCoeffs) then
-          coeffExp := listGet(rowCoeffs, i);
-        else
-          coeffExp := DAE.RCONST(0.0);
-        end if;
+      // obtain coefficient: coefficient for seed 's' in equation (row) 'i'
+      rowCoeffs := listGet(coeffMatrixRows, i);
+      if s <= listLength(rowCoeffs) then
+        coeffExp := listGet(rowCoeffs, s);
       else
         coeffExp := DAE.RCONST(0.0);
       end if;
@@ -2083,17 +2148,31 @@ algorithm
       (newExp, _) := ExpressionSimplify.simplify(newExp);
     end if;
 
-    // preserve equation kind and source/attr when possible
-    newEq := match(origEq)
-      case BackendDAE.EQUATION(exp=lhs, scalar=rhs, source=src, attr=attr) then BackendDAE.EQUATION(lhs, newExp, src, attr);
-      case BackendDAE.RESIDUAL_EQUATION(exp=e, source=src, attr=attr) then BackendDAE.RESIDUAL_EQUATION(newExp, src, attr);
-      case BackendDAE.SOLVED_EQUATION(componentRef=cr, exp=e, source=src, attr=attr) then BackendDAE.SOLVED_EQUATION(cr, newExp, src, attr);
-      else BackendDAE.RESIDUAL_EQUATION(newExp, DAE.emptyElementSource, BackendDAE.EQ_ATTR_DEFAULT_UNKNOWN);
-    end match;
+    origEq := BackendEquation.get(eqArr, i);
+    // Preserve original equation kind and metadata but replace RHS with newExp.
+     newEq := match(origEq)
+      local
+        .DAE.ElementSource src;
+        BackendDAE.EquationAttributes attr;
+        .DAE.ComponentRef cr;
+
+      case BackendDAE.EQUATION(_, _, src, attr) then
+        BackendDAE.EQUATION(BackendEquation.getEquationLHS(origEq), newExp, src, attr);
+      case BackendDAE.RESIDUAL_EQUATION(_, src, attr) then
+        BackendDAE.RESIDUAL_EQUATION(newExp, src, attr);
+      case BackendDAE.SOLVED_EQUATION(cr, _, src, attr) then
+        BackendDAE.SOLVED_EQUATION(cr, newExp, src, attr);
+      else
+        BackendDAE.RESIDUAL_EQUATION(newExp, DAE.emptyElementSource, BackendDAE.EQ_ATTR_DEFAULT_UNKNOWN);
+     end match;
+
+    print("newEq\n");
+    BackendDump.printEquation(newEq);
+
     newEqList := newEq :: newEqList;
   end for;
 
-  newEqList := listReverse(newEqList);
+  //newEqList := listReverse(newEqList);
   // replace ordered equations in system
   newSyst := syst;
   newSyst := BackendDAEUtil.setEqSystEqs(newSyst, BackendEquation.listEquation(newEqList));
@@ -2105,7 +2184,7 @@ algorithm
     BackendDump.bltdump("Transposed Symbolic Jacobian", newJacDAE);
   end if;
 
-  outSj := (newJacDAE, name + "T", diffVars, diffedVars, allDiffedVars, dependencies);
+  outSj := (newJacDAE, matrixName + "T", diffVars, diffedVars, allDiffedVars, dependencies);
 end transposeSymbolicJacobianByCoefficients;
 
 protected function createLinearModelMatrices "This function creates the linear model matrices column-wise
