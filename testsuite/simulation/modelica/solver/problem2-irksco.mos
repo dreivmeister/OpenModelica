@@ -1,11 +1,11 @@
-// name: problem2-trapezoid
+// name: problem2-irksco
 // status: correct
 // teardown_command: rm -f testSolver.problem2* output.log
 // cflags: -d=-newInst
 
 stopTime := 321.8122;
 loadFile("testSolverPackage.mo"); getErrorString();
-simulate(testSolver.problem2, stopTime=stopTime, numberOfIntervals=3000, method="gbode", tolerance=1e-12, simflags="-gbm=trapezoid -gbctrl=const"); getErrorString();
+simulate(testSolver.problem2, stopTime=stopTime, numberOfIntervals=12000, method="gbode", simflags="-gbm=trapezoid"); getErrorString();
 
 res := OpenModelica.Scripting.compareSimulationResults("testSolver.problem2_res.mat",
   getEnvironmentVar("REFERENCEFILES")+"/solver/testSolver.problem2.mat",
@@ -38,17 +38,6 @@ val(y[5], stopTime);
 val(y[6], stopTime);
 val(y[7], stopTime);
 val(y[8], stopTime);
-/*
-val(der(y[1]), stopTime);
-val(der(y[2]), stopTime);
-val(der(y[3]), stopTime);
-val(der(y[4]), stopTime);
-val(der(y[5]), stopTime);
-val(der(y[6]), stopTime);
-val(der(y[7]), stopTime);
-val(der(y[8]), stopTime);
-*/
-
 
 // Result:
 // 321.8122
@@ -56,7 +45,7 @@ val(der(y[8]), stopTime);
 // ""
 // record SimulationResult
 //     resultFile = "testSolver.problem2_res.mat",
-//     simulationOptions = "startTime = 0.0, stopTime = 321.8122, numberOfIntervals = 3000, tolerance = 1e-12, method = 'gbode', fileNamePrefix = 'testSolver.problem2', options = '', outputFormat = 'mat', variableFilter = '.*', cflags = '', simflags = '-gbm=trapezoid -gbctrl=const'",
+//     simulationOptions = "startTime = 0.0, stopTime = 321.8122, numberOfIntervals = 12000, tolerance = 1e-06, method = 'gbode', fileNamePrefix = 'testSolver.problem2', options = '', outputFormat = 'mat', variableFilter = '.*', cflags = '', simflags = '-gbm=trapezoid'",
 //     messages = "LOG_STDOUT        | warning | Numerical Jacobians without coloring are currently not supported by GBODE. Colored numerical Jacobian will be used.
 // LOG_SUCCESS       | info    | The initialization finished successfully without homotopy method.
 // LOG_SUCCESS       | info    | The simulation finished successfully.
@@ -67,12 +56,12 @@ val(der(y[8]), stopTime);
 // {"Files Equal!"}
 // "Warning: 'compareSimulationResults' is deprecated. It is recommended to use 'diffSimulationResults' instead.
 // "
-// 0.0007371274223600833
-// 0.0001442478168241772
-// 5.888658259073608e-05
-// 0.001175644207684863
-// 0.002386240656818681
-// 0.006238604615261991
-// 0.002849917794937442
-// 0.002850082205060573
+// 0.0007366178626765966
+// 0.0001441704812983621
+// 5.881808635647067e-05
+// 0.001174685232618241
+// 0.002372321728263835
+// 0.006195567228064969
+// 0.002839857562499992
+// 0.002860142433740553
 // endResult
