@@ -646,6 +646,20 @@ algorithm
   print("\n");
 end dumpBackendDAE;
 
+public function dumpSymbolicJacobian
+  input Option<BackendDAE.SymbolicJacobian> inSymbolicJacobian;
+protected
+  BackendDAE.BackendDAE jacDAE;
+  String name;
+  list<BackendDAE.Var> diffVars, diffedVars;
+algorithm
+  (jacDAE, name, diffVars, diffedVars, _, _) := Util.getOption(inSymbolicJacobian);
+  print("=== " + name + " ===\n");
+  print("diffVars: \n" + BackendDump.varListString(diffVars, "diffVars") + "\n");
+  print("diffedVars: \n" + BackendDump.varListString(diffedVars, "diffedVars") + "\n");
+  BackendDump.bltdump("DAE (" + name + ")", jacDAE);
+end dumpSymbolicJacobian;
+
 public function dumpEqSystem
   input BackendDAE.EqSystem inEqSystem;
   input String heading;
