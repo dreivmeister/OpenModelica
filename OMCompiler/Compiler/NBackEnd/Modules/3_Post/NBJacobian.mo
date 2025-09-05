@@ -274,6 +274,7 @@ public
   algorithm
     func := match Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN)
       case "symbolic" then jacobianSymbolic;
+      case "symbolictranspose" then jacobianSymbolicTranspose;
       case "numeric"  then jacobianNumeric;
       case "none"     then jacobianNone;
     end match;
@@ -691,6 +692,13 @@ protected
     state_vars := list(Util.getOption(BVariable.getVarState(var)) for var in derivative_vars);
     seedCandidates := VariablePointers.fromList(state_vars, partialCandidates.scalarized);
 
+    print(VariablePointers.toString(VariablePointers.fromList(derivative_vars), "derivative vars") + "\n");
+    print(VariablePointers.toString(VariablePointers.fromList(state_vars), "state vars") + "\n");
+    print(VariablePointers.toString(seedCandidates, "Seed Candidates") + "\n");
+    print(VariablePointers.toString(partialCandidates, "Partial Candidates") + "\n");
+    print(VariablePointers.toString(unknowns, "Unknowns") + "\n");
+    print(VariablePointers.toString(knowns, "Knowns") + "\n");
+    print(EquationPointers.toString(part.equations, "Equations") + "\n");
     (jacobian, funcTree) := func(name, jacType, seedCandidates, partialCandidates, part.equations, knowns, part.strongComponents, funcTree, kind ==  NBPartition.Kind.INI);
 
     part.association := Partition.Association.CONTINUOUS(kind, jacobian);
@@ -714,11 +722,17 @@ protected
     SparsityColoring sparsityColoring;
 
     BVariable.checkVar func = getTmpFilterFunction(jacType);
+
+    ComponentRef k, v;
+    Equation eq;
+    list<list<Expression>> a;
+    list<String> b;
   algorithm
     if Util.isSome(strongComponents) then
       // filter all discrete strong components and differentiate the others
       // todo: mixed algebraic loops should be here without the discrete subsets
       comps := list(comp for comp guard(not StrongComponent.isDiscrete(comp)) in Util.getOption(strongComponents));
+      print("Differentiating " + intString(listLength(comps)) + " strong components.\n");
     else
       Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because no strong components were given!"});
     end if;
@@ -730,12 +744,19 @@ protected
     (res_vars, tmp_vars) := List.splitOnTrue(VariablePointers.toList(partialCandidates), func);
     (tmp_vars, _) := List.splitOnTrue(tmp_vars, function BVariable.isContinuous(init = init));
 
+    print(VariablePointers.toString(VariablePointers.fromList(tmp_vars), "tmp_vars") + "\n"); // no tmp vars
+    print(VariablePointers.toString(VariablePointers.fromList(res_vars), "res_vars") + "\n"); // 2
+
     for v in res_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init = init); end for;
     res_vars := Pointer.access(pDer_vars_ptr);
+
+    print(VariablePointers.toString(VariablePointers.fromList(res_vars), "res_vars after filter") + "\n"); // get the new names
 
     pDer_vars_ptr := Pointer.create({});
     for v in tmp_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = true), init = init); end for;
     tmp_vars := Pointer.access(pDer_vars_ptr);
+
+    print(VariablePointers.toString(VariablePointers.fromList(tmp_vars), "tmp_vars after filter") + "\n");
 
     // Build differentiation argument structure
     diffArguments := Differentiate.DIFFERENTIATION_ARGUMENTS(
@@ -746,6 +767,13 @@ protected
       funcTree        = funcTree,
       scalarized      = seedCandidates.scalarized
     );
+
+    // print diff map
+    print("Diff map:\n");
+    for tpl in UnorderedMap.toList(diff_map) loop
+      (k, v) := tpl;
+      print("  " + ComponentRef.toString(k) + " -> " + ComponentRef.toString(v) + "\n");
+    end for;
 
     // differentiate all strong components
     (diffed_comps, diffArguments) := Differentiate.differentiateStrongComponentList(comps, diffArguments, idx, name, getInstanceName());
@@ -783,7 +811,218 @@ protected
       sparsityPattern   = sparsityPattern,
       sparsityColoring  = sparsityColoring
     ));
+
+    (a, b) := extractSeedResponsesFromJacobian(Util.getOption(jacobian));
+
+    for row in a loop
+      print("{ " + stringDelimitList(List.map(row, Expression.toString), ", ") + " }\n");
+    end for;
+
   end jacobianSymbolic;
+
+
+  protected function extractSeedResponsesFromJacobian
+  "For a JACOBIAN backendDAE: iterate all strong components / equations and for each
+   equation compute the expression results for each seed by setting the seed of
+   interest to 1 and all other seeds to 0. Returns a list per equation of the
+   substituted expressions (one entry per seed). This is a skeleton that uses
+   existing VariablePointers/Expression utilities; adapt the StrongComponent/Equation
+   accessors to your concrete API if names differ."
+  input BackendDAE jac;
+  output list<list<Expression>> perEquationPerSeedResults "outer list: equations (in SC order), inner list: result expr per seed";
+  output list<String> equationIds "optional human-readable eq ids (for debug)";
+protected
+  NBVariable.VarData vd;
+  VariablePointers seedVP;
+  list<Pointer<NBVariable.Variable>> seedPtrList;
+  list<NBackendDAE.Expression> seedCrefExprs = {};
+  array<NBStrongComponent.StrongComponent> comps;
+  Integer nComps, si, eqi, s;
+  list<Pointer<NBEquation.Equation>> eqPtrs = {};
+  NBEquation.Equation eq;
+  NBackendDAE.Expression eqExp;
+  UnorderedMap<NBackendDAE.ComponentRef, NBackendDAE.Expression> replaceMap;
+  list<list<NBackendDAE.Expression>> results = {};
+  list<NBackendDAE.Expression> singleEqResults;
+  list<String> ids = {};
+algorithm
+  perEquationPerSeedResults := {};
+  equationIds := {};
+
+  
+  // extract varData and seed variable pointers
+  vd := BackendDAE.getVarData(jac);
+  // adjust field access if your VarData record uses different field name
+  seedVP := VarData.getSeeds(vd); // VariablePointers
+  seedPtrList := VariablePointers.toList(seedVP);
+  // build seed cref expressions for easy matching: Expression.CREF(cref)
+  for si in 1:listLength(seedPtrList) loop
+  seedCrefExprs := Expression.CREF(
+  NFComponentRef.fromAbsynCref(Absyn.ComponentRef.CREF_IDENT(BVariable.nameString(Pointer.access(seedPtrList[si])), {})),
+  NFType.Real()
+) :: seedCrefExprs;
+  end for;
+  seedCrefExprs := listReverse(seedCrefExprs);
+
+  // iterate strong components; get array and its length
+  comps := jac.comps;
+  nComps := arrayLength(comps);
+
+  // For each strong component, extract its equations.
+  // NOTE: StrongComponent API varies: adapt the eq-fetch below to your real API.
+  for eqi in 1:nComps loop
+    // get pointer(s) to equations inside this component
+    // TODO: replace the following pseudo-access with your StrongComponent method to get eq pointers/list
+    // Example possibilities:
+    //   eqPtrs := StrongComponent.getEquationPointers(comps[eqi]);
+    //   eqPtrs := StrongComponent.equationPointers(comps[eqi]);
+    eqPtrs := StrongComponent.getEquationPointers(comps[eqi]); // <-- adapt if this function name differs
+
+    // now iterate each equation pointer inside the component
+    for ptr in eqPtrs loop
+      eq := Pointer.access(ptr);
+
+      // build residual/expression to probe
+      // TODO: adapt to how your Equation exposes its main expression (e.g., Equation.getRhs, Equation.getResidualExp)
+      eqExp := NBEquation.Equation.getResidualExp(eq); // <-- adapt if name differs
+
+      // store id for debug: prefer Equation.toString or StrongComponent.toString if available
+      ids := (if isSome(NBEquation.Equation.toStringOption(ptr)) then NBEquation.Equation.toString(ptr) else "sc" + intString(eqi)) :: ids;
+
+      // For each seed build a replacement map: seed_s -> 1, others -> 0
+      singleEqResults := {};
+      for s in 1:listLength(seedPtrList) loop
+        replaceMap := UnorderedMap.new<NBackendDAE.ComponentRef, NBackendDAE.Expression>(NBackendDAE.ComponentRef.hash, NBackendDAE.ComponentRef.isEqual);
+        for si in 1:listLength(seedPtrList) loop
+          if si == s then
+            UnorderedMap.add(BackendVariable.getVarCref(Pointer.access(seedPtrList[si])), DAE.RCONST(1.0), replaceMap);
+          else
+            UnorderedMap.add(BackendVariable.getVarCref(Pointer.access(seedPtrList[si])), DAE.RCONST(0.0), replaceMap);
+          end if;
+        end for;
+
+        // apply replacements to eqExp. Use your Expression.replace/map util.
+        // Example: Equation.map/Expression.map or NBEquation.replaceCrefs.
+        // Here we call a generic util: NBEquation.replaceCrefsInExp(expr, replaceMap)
+        // TODO: implement/replace with your API
+        eqExp := NBEquation.Equation.getResidualExp(eq); // fresh copy
+        eqExp := NBEquation.replaceCrefsInExp(eqExp, replaceMap); // <-- adapt to actual function
+        (eqExp, _) := NFSimplifyExp.simplify(expr = eqExp); // optional simplify step
+
+        singleEqResults := eqExp :: singleEqResults;
+      end for;
+
+      singleEqResults := listReverse(singleEqResults);
+      results := singleEqResults :: results;
+    end for;
+  end for;
+
+  perEquationPerSeedResults := listReverse(results);
+  equationIds := listReverse(ids);
+  return;
+end extractSeedResponsesFromJacobian;
+
+  function jacobianSymbolicTranspose "creates jacobian in transpose mode"
+    extends Module.jacobianInterface; 
+  protected
+    list<StrongComponent> comps, diffed_comps;
+    Pointer<list<Pointer<Variable>>> seed_vars_ptr = Pointer.create({});
+    Pointer<list<Pointer<Variable>>> pDer_vars_ptr  = Pointer.create({});
+    UnorderedMap<ComponentRef,ComponentRef> diff_map = UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
+    Differentiate.DifferentiationArguments diffArguments;
+    Pointer<Integer> idx = Pointer.create(0);
+
+    list<Pointer<Variable>> all_vars, unknown_vars, aux_vars, alias_vars, depend_vars, res_vars, tmp_vars, seed_vars;
+    BVariable.VarData varDataJac;
+    SparsityPattern sparsityPattern;
+    SparsityColoring sparsityColoring;
+
+    BVariable.checkVar func = getTmpFilterFunction(jacType);
+  algorithm
+    // same strong-component filtering as jacobianSymbolic
+    if Util.isSome(strongComponents) then
+      comps := list(comp for comp guard(not StrongComponent.isDiscrete(comp)) in Util.getOption(strongComponents));
+    else
+      Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because no strong components were given!"});
+    end if;
+
+    // In transpose mode:
+    // - newSeedCandidates  = partialCandidates  (one seed per ROW)
+    // - newPartialCandidates = seedCandidates  (original columns become partials)
+    // Create seed vars for newSeedCandidates
+    VariablePointers.mapPtr(partialCandidates, function makeVarTraverse(name = name, vars_ptr = seed_vars_ptr, map = diff_map, makeVar = BVariable.makeSeedVar, init = init));
+
+    // // Create pDer vars for original seedCandidates (now treated as partials)
+    // // Filter continuous / temporary as in jacobianSymbolic
+    // (res_vars, tmp_vars) := List.splitOnTrue(VariablePointers.toList(seedCandidates), func);
+    // (tmp_vars, _) := List.splitOnTrue(tmp_vars, function BVariable.isContinuous(init = init));
+
+    // --- Replace creation order: create pDer vars for rows (partialCandidates) first,
+    //     then create seed vars for original seedCandidates (columns).
+    pDer_vars_ptr := Pointer.create({});
+    // split partialCandidates into result / tmp like in jacobianSymbolic
+    (res_vars, tmp_vars) := List.splitOnTrue(VariablePointers.toList(partialCandidates), func);
+    (tmp_vars, _) := List.splitOnTrue(tmp_vars, function BVariable.isContinuous(init = init));
+
+    // make pDer vars for res_vars (non-tmp)
+    for v in res_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init); end for;
+    res_vars := Pointer.access(pDer_vars_ptr);
+
+    // // make pDer vars for tmp_vars (tmp)
+    pDer_vars_ptr := Pointer.create({});
+    for v in tmp_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = true), init); end for;
+    tmp_vars := Pointer.access(pDer_vars_ptr);
+
+    // Build differentiation arguments: diff_map maps original variable -> pDer cref (original seeds -> pDer)
+    diffArguments := Differentiate.DIFFERENTIATION_ARGUMENTS(
+      diffCref        = ComponentRef.EMPTY(),
+      new_vars        = {},
+      diff_map        = SOME(diff_map),
+      diffType        = NBDifferentiate.DifferentiationType.JACOBIAN,
+      funcTree        = funcTree,
+      scalarized      = partialCandidates.scalarized    // column/row scalarization semantics: keep as appropriate
+    );
+
+    // Differentiate using the same routine
+    (diffed_comps, diffArguments) := Differentiate.differentiateStrongComponentList(comps, diffArguments, idx, name, getInstanceName());
+    funcTree := diffArguments.funcTree;
+
+    // assemble VarData
+    unknown_vars  := listAppend(res_vars, tmp_vars);     // pDer result vars are the unknowns
+    all_vars      := unknown_vars;                       // additional vars may be appended later
+
+    seed_vars     := Pointer.access(seed_vars_ptr);      // seeds created from original partialCandidates
+    aux_vars      := seed_vars;                          // auxiliaries include seeds
+    alias_vars    := {};
+    depend_vars   := {};
+
+    varDataJac := BVariable.VAR_DATA_JAC(
+      variables     = VariablePointers.fromList(all_vars),
+      unknowns      = VariablePointers.fromList(unknown_vars),
+      knowns        = knowns,
+      auxiliaries   = VariablePointers.fromList(aux_vars),
+      aliasVars     = VariablePointers.fromList(alias_vars),
+      diffVars      = seedCandidates,                      // original seedCandidates are now the diffVars (rows->columns swap)
+      dependencies  = VariablePointers.fromList(depend_vars),
+      resultVars    = VariablePointers.fromList(res_vars),
+      tmpVars       = VariablePointers.fromList(tmp_vars),
+      seedVars      = VariablePointers.fromList(seed_vars) // seed vars from original partialCandidates
+    );
+
+    // Build sparsity pattern w.r.t. swapped roles:
+    // seedCandidates argument = partialCandidates (rows-as-seeds)
+    // partialCandidates argument = seedCandidates (original columns become partials)
+    (sparsityPattern, sparsityColoring) := SparsityPattern.create(partialCandidates, seedCandidates, strongComponents, jacType);
+
+    jacobian := SOME(Jacobian.JACOBIAN(
+      name              = name,
+      jacType           = jacType,
+      varData           = varDataJac,
+      comps             = listArray(diffed_comps),
+      sparsityPattern   = sparsityPattern,
+      sparsityColoring  = sparsityColoring
+    ));
+  end jacobianSymbolicTranspose;
 
   function jacobianNumeric "still creates sparsity pattern"
     extends Module.jacobianInterface;
