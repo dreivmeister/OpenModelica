@@ -654,10 +654,12 @@ protected
   list<BackendDAE.Var> diffVars, diffedVars;
 algorithm
   (jacDAE, name, diffVars, diffedVars, _, _) := Util.getOption(inSymbolicJacobian);
+  print("START\n");
   print("=== " + name + " ===\n");
-  print("diffVars: \n" + BackendDump.varListString(diffVars, "diffVars") + "\n");
-  print("diffedVars: \n" + BackendDump.varListString(diffedVars, "diffedVars") + "\n");
-  BackendDump.bltdump("DAE (" + name + ")", jacDAE);
+  print("\n" + BackendDump.varListString(diffVars, "diffVars:") + "\n");
+  print("\n" + BackendDump.varListString(diffedVars, "diffedVars:") + "\n");
+  BackendDump.bltdump("DAE", jacDAE);
+  print("END\n");
 end dumpSymbolicJacobian;
 
 public function dumpEqSystem
