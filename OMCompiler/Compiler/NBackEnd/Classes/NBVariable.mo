@@ -2448,6 +2448,19 @@ public
       end match;
     end getSeeds;
 
+    function getUnknowns
+      input VarData varData;
+      output VariablePointers unknownVars;
+    algorithm
+      unknownVars := match varData
+        case VAR_DATA_JAC() then varData.unknowns;
+        case VAR_DATA_HES() then varData.unknowns;
+        else algorithm
+          Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " failed because of incorrect record type."});
+        then fail();
+      end match;
+    end getUnknowns;
+
     function setVariables
       input output VarData varData;
       input VariablePointers variables;

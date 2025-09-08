@@ -758,6 +758,19 @@ public
     end match;
   end getVariables;
 
+  function getEquationPointer
+    // ToDo: other types
+    input StrongComponent comp;
+    output Pointer<Equation> vars;
+  algorithm
+    vars := match comp
+      case SINGLE_COMPONENT() then comp.eqn;
+      else algorithm
+        Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because of wrong component: " + toString(comp)});
+      then fail();
+    end match;
+  end getEquationPointer;
+
   function isDiscrete
     "checks if all equations are discrete"
     input StrongComponent comp;

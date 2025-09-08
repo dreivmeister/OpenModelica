@@ -227,6 +227,18 @@ public
     end match;
   end getFunctionTree;
 
+  function getComponents
+    input BackendDAE bdae;
+    output array<StrongComponent> comps;
+  algorithm
+    comps := match bdae
+      case JACOBIAN(comps = comps) then comps;
+      else algorithm
+        Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " failed! Only the record type JACOBIAN() has components."});
+      then fail();
+    end match;
+  end getComponents;
+
   function sizes
     input BackendDAE bdae;
     output tuple<Integer, Integer> varSizes "scal, arr";
