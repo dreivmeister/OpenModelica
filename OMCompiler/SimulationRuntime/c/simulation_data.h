@@ -159,7 +159,9 @@ typedef struct SPARSE_PATTERN
   unsigned int* index;            /* Array with number of non-zeros indices */
   unsigned int sizeofIndex;       /* Length of array index, equal to numberOfNonZeros */
   unsigned int* colorCols;        /* Color coding of columns. First color is `1`, second is `2`, ...
-                                   * Length of array is rows */
+                                   * Length of array is cols? */
+  unsigned int* colorRows;        /* Color coding of rows. First color is `1`, second is `2`, ...
+                                   * Length of array is rows? */
   unsigned int numberOfNonZeros;  /* Number of non-zero elements in matrix */
   unsigned int maxColors;         /* Number of colors */
 } SPARSE_PATTERN;
@@ -197,10 +199,13 @@ typedef struct JACOBIAN
   size_t sizeTmpVars;                   /* Length of vector tmpVars */
   SPARSE_PATTERN* sparsePattern;        /* Contain sparse pattern including coloring */
   modelica_real* seedVars;              /* Seed vector for specifying which columns to evaluate */
+  modelica_real* seedVarsRow;           /* Seed vector for specifying which rows to evaluate of sizeRows */
   modelica_real* tmpVars;               /* Partial derivatives used to compute resultVars */
   modelica_real* resultVars;            /* Result column for given seed vector */
+  modelica_real* resultVarsRow;         /* Result row for given seed vector of sizeCols */
   modelica_real dae_cj;                 /* Is the scalar in the system Jacobian, proportional to the inverse of the step size. From User Documentation for ida v5.4.0 equation (2.5). */
   jacobianColumn_func_ptr evalColumn;   /* symbolic jacobian column based on seed vector */
+  jacobianColumn_func_ptr evalRow;      /* symbolic jacobian row based on seed vector */
   jacobianColumn_func_ptr constantEqns; /* Constant equations independent of seed vector */
 } JACOBIAN;
 

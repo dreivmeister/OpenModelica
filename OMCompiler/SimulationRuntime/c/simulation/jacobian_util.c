@@ -162,6 +162,66 @@ void evalJacobian(DATA* data, threadData_t *threadData, JACOBIAN* jacobian, JACO
   }
 }
 
+
+/*! \fn evalJacobianRow
+ *
+ *  compute entries of Jacobian in sparse CSC or dense format
+ *  uses coloring (sparsePattern non NULL) row wise
+ *
+ *  \param [ref] [data]
+ *  \param [ref] [threadData]
+ *  \param [ref] [jacobian]        Pointer to Jacobian
+ *  \param [ref] [parentJacobian]  Pointer to parent Jacobian
+ *  \param [out] [jac]             Output buffer, size nnz (sparse) or #rows * #cols (dense), non zero-initialized
+ *  \param [ref] [isDense]         Flag to set dense / sparse output
+ */
+void evalJacobianRow(DATA* data, threadData_t *threadData, JACOBIAN* jacobian, JACOBIAN* parentJacobian, modelica_real* jac, modelica_boolean isDense)
+{
+  int color, column, row, nz;
+  const SPARSE_PATTERN* sp = jacobian->sparsePattern;
+
+  /* evaluate constant equations of Jacobian */
+  // whats going on here?
+  if (jacobian->constantEqns != NULL) {
+    jacobian->constantEqns(data, threadData, jacobian, parentJacobian);
+  }
+
+  if (isDense) {
+    /* memset to zero for dense, since solvers might destroy "hard zeros"
+     * does not apply for sparse, since the values are overwritten */
+    memset(jac, 0.0, jacobian->sizeRows * jacobian->sizeCols * sizeof(modelica_real));
+  }
+
+  /* evaluate Jacobian */
+  for (color = 0; color < sp->maxColors; color++) {
+    /* activate seed variable for the corresponding color */
+    for (row = 0; row < jacobian->sizeRows; row++)
+      if (sp->colorRows[row]-1 == color)
+        jacobian->seedVarsRow[row] = 1.0;
+
+    /* evaluate Jacobian row */
+    jacobian->evalRow(data, threadData, jacobian, parentJacobian);
+
+    for (row = 0; row < jacobian->sizeRows; row++) {
+      if (sp->colorRows[row]-1 == color) {
+        for (nz = sp->leadindex[row]; nz < sp->leadindex[row+1]; nz++) {
+          column = sp->index[nz];
+          if (!isDense) {
+            /* sparse case */
+            jac[nz] = jacobian->resultVars[column]; //* solverData->xScaling[j];
+          }
+          else {
+            /* dense case */
+            jac[row * jacobian->sizeCols + column] = jacobian->resultVarsRow[column]; //* solverData->xScaling[j];
+          }
+        }
+        /* de-activate seed variable for the corresponding color */
+        jacobian->seedVarsRow[row] = 0.0;
+      }
+    }
+  }
+}
+
 /**
  * @brief Allocate memory for sparsity pattern.
  *
