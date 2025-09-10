@@ -57,7 +57,7 @@ protected
   import BVariable = NBVariable;
   import Differentiate = NBDifferentiate;
   import NBDifferentiate.{DifferentiationArguments, DifferentiationType};
-  import NBEquation.{Equation, EquationPointers, EqData};
+  import NBEquation.{Equation, EquationPointers, EquationPointer, EqData};
   import Jacobian = NBackendDAE.BackendDAE;
   import Matching = NBMatching;
   import Replacements = NBReplacements;
@@ -274,7 +274,7 @@ public
   algorithm
     func := match Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN)
       case "symbolic" then jacobianSymbolic;
-      // case "adjoint" then jacobianSymbolicAdjointFromSymbolic;
+      case "adjoint" then jacobianSymbolic;
       case "numeric"  then jacobianNumeric;
       case "none"     then jacobianNone;
     end match;
@@ -692,13 +692,6 @@ protected
     state_vars := list(Util.getOption(BVariable.getVarState(var)) for var in derivative_vars);
     seedCandidates := VariablePointers.fromList(state_vars, partialCandidates.scalarized);
 
-    print(VariablePointers.toString(VariablePointers.fromList(derivative_vars), "derivative vars") + "\n");
-    print(VariablePointers.toString(VariablePointers.fromList(state_vars), "state vars") + "\n");
-    print(VariablePointers.toString(seedCandidates, "Seed Candidates") + "\n");
-    print(VariablePointers.toString(partialCandidates, "Partial Candidates") + "\n");
-    print(VariablePointers.toString(unknowns, "Unknowns") + "\n");
-    print(VariablePointers.toString(knowns, "Knowns") + "\n");
-    print(EquationPointers.toString(part.equations, "Equations") + "\n");
     (jacobian, funcTree) := func(name, jacType, seedCandidates, partialCandidates, part.equations, knowns, part.strongComponents, funcTree, kind ==  NBPartition.Kind.INI);
 
     part.association := Partition.Association.CONTINUOUS(kind, jacobian);
@@ -722,11 +715,6 @@ protected
     SparsityColoring sparsityColoring;
 
     BVariable.checkVar func = getTmpFilterFunction(jacType);
-
-    ComponentRef k, v;
-    Equation eq;
-    Option<Jacobian> a;
-    FunctionTree b;
   algorithm
     if Util.isSome(strongComponents) then
       // filter all discrete strong components and differentiate the others
@@ -744,19 +732,12 @@ protected
     (res_vars, tmp_vars) := List.splitOnTrue(VariablePointers.toList(partialCandidates), func);
     (tmp_vars, _) := List.splitOnTrue(tmp_vars, function BVariable.isContinuous(init = init));
 
-    print(VariablePointers.toString(VariablePointers.fromList(tmp_vars), "tmp_vars") + "\n"); // no tmp vars
-    print(VariablePointers.toString(VariablePointers.fromList(res_vars), "res_vars") + "\n"); // 2
-
     for v in res_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init = init); end for;
     res_vars := Pointer.access(pDer_vars_ptr);
-
-    print(VariablePointers.toString(VariablePointers.fromList(res_vars), "res_vars after filter") + "\n"); // get the new names
 
     pDer_vars_ptr := Pointer.create({});
     for v in tmp_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = true), init = init); end for;
     tmp_vars := Pointer.access(pDer_vars_ptr);
-
-    print(VariablePointers.toString(VariablePointers.fromList(tmp_vars), "tmp_vars after filter") + "\n");
 
     // Build differentiation argument structure
     diffArguments := Differentiate.DIFFERENTIATION_ARGUMENTS(
@@ -768,22 +749,9 @@ protected
       scalarized      = seedCandidates.scalarized
     );
 
-    // print diff map
-    print("Diff map:\n");
-    for tpl in UnorderedMap.toList(diff_map) loop
-      (k, v) := tpl;
-      print("  " + ComponentRef.toString(k) + " -> " + ComponentRef.toString(v) + "\n");
-    end for;
-
     // differentiate all strong components
     (diffed_comps, diffArguments) := Differentiate.differentiateStrongComponentList(comps, diffArguments, idx, name, getInstanceName());
     funcTree := diffArguments.funcTree;
-
-    // // print diffed_comps
-    // print("Differentiated components:\n");
-    // for c in diffed_comps loop
-    //   print(StrongComponent.toString(c, 2) + "\n");
-    // end for;
 
     // collect var data (most of this can be removed)
     unknown_vars  := listAppend(res_vars, tmp_vars);
@@ -818,42 +786,11 @@ protected
       sparsityColoring  = sparsityColoring
     ));
 
-    print("Jacobian Directional:\n" + NBJacobian.toString(Util.getOption(jacobian), " ") + "\n");
-
-    a := jacobianSymbolicAdjointFromSymbolic(Util.getOption(jacobian), strongComponents, varDataJac, seedCandidates, partialCandidates, jacType, name);
-    print("Jacobian Adjoint:\n" + NBJacobian.toString(Util.getOption(a), " ") + "\n");
-    b := funcTree;
-  end jacobianSymbolic;
-
-  protected function replaceCrefsInExp
-    "Replaces all occurrences of crefs in an expression according to the given map."
-    input output Expression exp;
-    input UnorderedMap<ComponentRef, Expression> replaceMap;
-  algorithm
-    exp := Expression.map(exp, function replaceCrefInExp1(replaceMap = replaceMap));
-  end replaceCrefsInExp;
-
-  protected function replaceCrefInExp1
-    input output Expression exp;
-    input UnorderedMap<ComponentRef, Expression> replaceMap;
-  protected
-    ComponentRef cref;
-  algorithm
-    if Expression.isCref(exp) then
-      cref := Expression.toCref(exp);
-      if UnorderedMap.contains(cref, replaceMap) then
-        exp := UnorderedMap.getOrFail(cref, replaceMap);
-      end if;
+    // use jacobian to generate adjoint jacobian if requested
+    if Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN) == "adjoint" then
+      jacobian := jacobianSymbolicAdjointFromSymbolic(Util.getOption(jacobian), strongComponents, varDataJac, seedCandidates, partialCandidates, jacType, name);
     end if;
-  end replaceCrefInExp1;
-
-  protected function makeAddExp
-    input Expression e1;
-    input Expression e2;
-    output Expression res;
-  algorithm
-    res := Expression.BINARY(e1, Operator.makeAdd(Type.REAL()), e2);
-  end makeAddExp;
+  end jacobianSymbolic;
 
   protected function buildJacobianEquationsFromTransposed
     "Constructs new jacobian equations from a transposed coefficient matrix.
@@ -863,16 +800,16 @@ protected
     - newSeedVars: list of seed variable pointers (RHS, one per column)
     - coeffsT: transposed coefficient matrix (coeffsT[i][j] is coefficient for resultVar[i], seedVar[j])
     Returns: list of new NBEquation.Equation equations."
-    input list<Pointer<NBVariable.Variable>> newResultVars;
-    input list<Pointer<NBVariable.Variable>> newSeedVars;
+    input list<VariablePointer> newResultVars;
+    input list<VariablePointer> newSeedVars;
     input list<list<Expression>> coeffsT;
-    output list<Pointer<NBEquation.Equation>> newEquations;
+    output list<EquationPointer> newEquations;
   protected
     Integer nRows, nCols, i, j;
-    Pointer<NBVariable.Variable> resVarPtr, seedVarPtr;
+    VariablePointer resVarPtr, seedVarPtr;
     Expression lhs, rhs, term;
     list<Expression> row, terms;
-    Pointer<NBEquation.Equation> eq;
+    EquationPointer eq;
   algorithm
     newEquations := {};
     nRows := listLength(coeffsT);
@@ -881,7 +818,7 @@ protected
     for i in 1:nRows loop
       row := listGet(coeffsT, i);
       resVarPtr := listGet(newResultVars, i);
-      lhs := Expression.CREF(NBVariable.getVarType(resVarPtr), NBVariable.getVarName(resVarPtr));
+      lhs := Expression.CREF(BVariable.getVarType(resVarPtr), BVariable.getVarName(resVarPtr));
 
       terms := {};
       for j in 1:nCols loop
@@ -894,7 +831,7 @@ protected
           term := Expression.BINARY(
             term,
             Operator.makeMul(Type.REAL()),
-            Expression.CREF(NBVariable.getVarType(seedVarPtr), NBVariable.getVarName(seedVarPtr))
+            Expression.CREF(BVariable.getVarType(seedVarPtr), BVariable.getVarName(seedVarPtr))
           );
           terms := term :: terms;
         end if;
@@ -908,7 +845,7 @@ protected
       end if;
 
       // Build the equation: lhs = rhs
-      eq := NBEquation.Equation.makeAssignment(lhs, rhs, Pointer.create(i-1), "ODE_JAC_ADJ", NBEquation.Iterator.EMPTY(), BackendDAE.EquationAttributes.default(NBEquation.EquationKind.CONTINUOUS, false));
+      eq := BEquation.Equation.makeAssignment(lhs, rhs, Pointer.create(i-1), "ODE_JAC_ADJ", BEquation.Iterator.EMPTY(), BackendDAE.EquationAttributes.default(NBEquation.EquationKind.CONTINUOUS, false));
       newEquations := eq :: newEquations;
     end for;
     newEquations := listReverse(newEquations);
@@ -928,55 +865,37 @@ protected
     input JacobianType jacType;
     input String name;
     output Option<Jacobian> jacobian;
-    // output list<list<Expression>> perEquationPerSeedResults "outer list: equations (in SC order), inner list: result expr per seed";
   protected
-    NBVariable.VarData vd;
-    VariablePointers seedVP, pDerVP;
-    list<Pointer<NBVariable.Variable>> seedPtrList, pDerPtrList;
-    Pointer<NBVariable.Variable> seedPtr;
-    Option<Pointer<NBVariable.Variable>> pDER;
-    array<NBStrongComponent.StrongComponent> comps;
-    list<StrongComponent> newEquationsSC = {};
-    Integer nComps, eqi, s;
+    BVariable.VarData vd;
+    list<VariablePointer> seedPtrList, pDerPtrList;
+    array<StrongComponent> comps, diffed_comps_array;
+    list<StrongComponent> diffed_comps = {};
+    Integer eqi, s;
     ComponentRef seedVarName;
     Pointer<Equation> eqPtr;
-    Equation eq;
-    NBackendDAE.Expression eqExp;
+    Expression eqExp;
     UnorderedMap<ComponentRef, Expression> replaceMap;
     list<list<Expression>> results = {}, perEquationPerSeedResultsT = {}, perEquationPerSeedResults = {};
     list<Expression> seedCrefExprs = {}, pDerCrefExprs = {}, singleEqResults = {};
-    list<Pointer<NBEquation.Equation>> newEquations = {};
-    StrongComponent newSC;
+    list<EquationPointer> newEquations = {};
+    StrongComponent diffed_comp;
     SparsityPattern sparsityPattern;
     SparsityColoring sparsityColoring;
   algorithm  
     // extract varData and seed variable pointers
     vd := BackendDAE.getVarData(jac);
-    print(VarData.toStringVerbose(vd) + "\n");
     // adjust field access if your VarData record uses different field name
-    seedVP := VarData.getSeeds(vd); // VariablePointers
-    seedPtrList := VariablePointers.toList(seedVP);
-
-    pDerVP := VarData.getUnknowns(vd);
-    pDerPtrList := VariablePointers.toList(pDerVP);
-    print(VariablePointers.toString(seedVP, "Seeds") + "\n");
-    print(VariablePointers.toString(pDerVP, "pDers") + "\n");
+    seedPtrList := VariablePointers.toList(VarData.getSeeds(vd));
+    pDerPtrList := VariablePointers.toList(VarData.getUnknowns(vd));
     // build seed cref expressions for easy matching: Expression.CREF(cref)
-    seedCrefExprs := list(Expression.CREF(NFType.REAL(), BVariable.getVarName(s_i)) for s_i in seedPtrList);
-    pDerCrefExprs := list(Expression.CREF(NFType.REAL(), BVariable.getVarName(p_i)) for p_i in pDerPtrList);
-
-    print(stringDelimitList(List.map(seedCrefExprs, Expression.toString), ", ") + "\n");
-    print(stringDelimitList(List.map(pDerCrefExprs, Expression.toString), ", ") + "\n");
+    seedCrefExprs := list(Expression.CREF(Type.REAL(), BVariable.getVarName(s_i)) for s_i in seedPtrList);
+    pDerCrefExprs := list(Expression.CREF(Type.REAL(), BVariable.getVarName(p_i)) for p_i in pDerPtrList);
 
     // iterate strong components; get array and its length
     comps := BackendDAE.getComponents(jac);
-    nComps := arrayLength(comps);
 
     // For each strong component, extract its equation.
-    for eqi in 1:nComps loop
-      eqPtr := StrongComponent.getEquationPointer(comps[eqi]);
-      eq := Pointer.access(eqPtr);
-
+    for eqi in 1:arrayLength(comps) loop
       // For each seed build a replacement map: seed_s -> 1, others -> 0
       singleEqResults := {};
       for s in 1:listLength(seedPtrList) loop
@@ -994,9 +913,10 @@ protected
           UnorderedMap.add(BVariable.getVarName(pDerPtr), Expression.REAL(0.0), replaceMap);
         end for;
 
-        eqExp := Equation.getResidualExp(eq);
+        eqPtr := StrongComponent.getEquationPointer(comps[eqi]);
+        eqExp := Equation.getResidualExp(Pointer.access(eqPtr));
         eqExp := replaceCrefsInExp(eqExp, replaceMap);
-        eqExp := NFSimplifyExp.simplify(eqExp);
+        eqExp := SimplifyExp.simplify(eqExp);
 
         singleEqResults := eqExp :: singleEqResults;
       end for;
@@ -1007,51 +927,38 @@ protected
     perEquationPerSeedResults := listReverse(results);
     perEquationPerSeedResultsT := List.transposeList(perEquationPerSeedResults);
 
-    for row in perEquationPerSeedResults loop
-      print("{ " + stringDelimitList(List.map(row, Expression.toString), ", ") + " }\n");
-    end for;
-    print("Transposed:\n");
-    for row in perEquationPerSeedResultsT loop
-      print("{ " + stringDelimitList(List.map(row, Expression.toString), ", ") + " }\n");
-    end for;
-
     // the rows of aT are the new equations, each gets its own seed
     // the columns of aT get the same seed
     // new expressions
     newEquations := buildJacobianEquationsFromTransposed(pDerPtrList, seedPtrList, perEquationPerSeedResultsT);
 
-
     // ToDo: handle other component types and take solve status from original component
     for i in 1:listLength(newEquations) loop
-      newSC := StrongComponent.SINGLE_COMPONENT(
+      diffed_comp := StrongComponent.SINGLE_COMPONENT(
         listGet(pDerPtrList, i),
         listGet(newEquations, i),
         NBSolve.Status.EXPLICIT
       );
-      newEquationsSC := newSC :: newEquationsSC;
+      diffed_comps := diffed_comp :: diffed_comps;
     end for;
-    newEquationsSC := listReverse(newEquationsSC); // is it needed?
-
-    // print("Differentiated components transposed:\n");
-    // for c in newEquationsSC loop
-    //   print(StrongComponent.toString(c, 2) + "\n");
-    // end for;
-
+    diffed_comps_array := listArray(diffed_comps);
     
     // (sparsityPattern, sparsityColoring) := SparsityPattern.create(seedCandidates, partialCandidates, SOME(listArray(listReverse(newEquationsSC))), jacType);
     // assume full dependency for now (lazy)
-    (sparsityPattern, sparsityColoring) := SparsityPattern.lazy(seedCandidates, partialCandidates, SOME(listArray(newEquationsSC)), jacType);
+    (sparsityPattern, sparsityColoring) := SparsityPattern.lazy(seedCandidates, partialCandidates, SOME(diffed_comps_array), jacType);
 
     jacobian := SOME(Jacobian.JACOBIAN(
       name              = name,
       jacType           = jacType,
       varData           = varDataJac,
-      comps             = listArray(newEquationsSC),
+      comps             = diffed_comps_array,
       sparsityPattern   = sparsityPattern,
       sparsityColoring  = sparsityColoring
     ));
 
-    //print("Jacobian adjoint:\n" + NBJacobian.toString(Util.getOption(jacobian), " ") + "\n");
+    if Flags.isSet(Flags.JAC_DUMP) then
+      print("Jacobian adjoint:\n" + NBJacobian.toString(Util.getOption(jacobian), " ") + "\n");
+    end if;
   end jacobianSymbolicAdjointFromSymbolic;
 
   function jacobianNumeric "still creates sparsity pattern"
@@ -1163,6 +1070,36 @@ protected
       end match;
     end if;
   end makeVarTraverse;
+
+  protected function replaceCrefsInExp
+    "Replaces all occurrences of crefs in an expression according to the given map."
+    input output Expression exp;
+    input UnorderedMap<ComponentRef, Expression> replaceMap;
+  algorithm
+    exp := Expression.map(exp, function replaceCrefInExp1(replaceMap = replaceMap));
+  end replaceCrefsInExp;
+
+  protected function replaceCrefInExp1
+    input output Expression exp;
+    input UnorderedMap<ComponentRef, Expression> replaceMap;
+  protected
+    ComponentRef cref;
+  algorithm
+    if Expression.isCref(exp) then
+      cref := Expression.toCref(exp);
+      if UnorderedMap.contains(cref, replaceMap) then
+        exp := UnorderedMap.getOrFail(cref, replaceMap);
+      end if;
+    end if;
+  end replaceCrefInExp1;
+
+  protected function makeAddExp
+    input Expression e1;
+    input Expression e2;
+    output Expression res;
+  algorithm
+    res := Expression.BINARY(e1, Operator.makeAdd(Type.REAL()), e2);
+  end makeAddExp;
 
   annotation(__OpenModelica_Interface="backend");
 end NBJacobian;
