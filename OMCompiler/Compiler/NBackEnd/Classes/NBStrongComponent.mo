@@ -765,6 +765,7 @@ public
   algorithm
     vars := match comp
       case SINGLE_COMPONENT() then comp.eqn;
+      case ALIAS()            then getEquationPointer(comp.original);
       else algorithm
         Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because of wrong component: " + toString(comp)});
       then fail();
