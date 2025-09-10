@@ -272,6 +272,15 @@ public
     name := var.name;
   end getVarName;
 
+  function getVarType
+    input Pointer<Variable> var_ptr;
+    output NFType ty;
+  protected
+    Variable var = Pointer.access(var_ptr);
+  algorithm
+    ty := var.ty;
+  end getVarType;
+
   function setVarName
     input output Pointer<Variable> var_ptr;
     input ComponentRef name;

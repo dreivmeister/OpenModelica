@@ -65,7 +65,7 @@ protected
   import StrongComponent = NBStrongComponent;
   import Partition = NBPartition;
   import NFOperator.{MathClassification, SizeClassification};
-  import NBVariable.{VariablePointers, VarData};
+  import NBVariable.{VariablePointers, VariablePointer, VarData};
 
   // Old Backend Import (remove once coloring ins ported)
   import SymbolicJacobian;
@@ -847,42 +847,13 @@ protected
     end if;
   end replaceCrefInExp1;
 
-  protected function transposeListOfLists
-    "Transpose a list of lists (e.g. for list<list<Expression>>)."
-    input list<list<Expression>> mat;
-    output list<list<Expression>> transposed;
-  protected
-    Integer nRows, nCols, i, j;
-    list<Expression> row;
-    list<list<Expression>> cols = {};
-  algorithm
-    // Defensive: handle empty input
-    if listEmpty(mat) then
-      transposed := {};
-      return;
-    end if;
-
-    nRows := listLength(mat);
-    nCols := listLength(listHead(mat));
-
-    // Build each column as a row in the transposed matrix
-    for j in 1:nCols loop
-      row := {};
-      for i in 1:nRows loop
-        row := listGet(listGet(mat, i), j) :: row;
-      end for;
-      cols := listReverse(row) :: cols;
-    end for;
-    transposed := listReverse(cols);
-  end transposeListOfLists;
-
-  protected function addExp
+  protected function makeAddExp
     input Expression e1;
     input Expression e2;
     output Expression res;
   algorithm
     res := Expression.BINARY(e1, Operator.makeAdd(Type.REAL()), e2);
-  end addExp;
+  end makeAddExp;
 
   protected function buildJacobianEquationsFromTransposed
     "Constructs new jacobian equations from a transposed coefficient matrix.
@@ -899,25 +870,22 @@ protected
   protected
     Integer nRows, nCols, i, j;
     Pointer<NBVariable.Variable> resVarPtr, seedVarPtr;
-    NBVariable.Variable resVar, seedVar;
     Expression lhs, rhs, term;
     list<Expression> row, terms;
     Pointer<NBEquation.Equation> eq;
-    list<Pointer<NBEquation.Equation>> eqs = {};
   algorithm
+    newEquations := {};
     nRows := listLength(coeffsT);
     nCols := if nRows > 0 then listLength(listHead(coeffsT)) else 0;
 
     for i in 1:nRows loop
       row := listGet(coeffsT, i);
       resVarPtr := listGet(newResultVars, i);
-      resVar := Pointer.access(resVarPtr);
-      lhs := Expression.CREF(resVar.ty, resVar.name);
+      lhs := Expression.CREF(NBVariable.getVarType(resVarPtr), NBVariable.getVarName(resVarPtr));
 
       terms := {};
       for j in 1:nCols loop
         seedVarPtr := listGet(newSeedVars, j);
-        seedVar := Pointer.access(seedVarPtr);
         // get the coefficient
         term := listGet(row, j);
         // skip zero coefficients
@@ -926,7 +894,7 @@ protected
           term := Expression.BINARY(
             term,
             Operator.makeMul(Type.REAL()),
-            Expression.CREF(seedVar.ty, seedVar.name)
+            Expression.CREF(NBVariable.getVarType(seedVarPtr), NBVariable.getVarName(seedVarPtr))
           );
           terms := term :: terms;
         end if;
@@ -936,15 +904,15 @@ protected
       if listEmpty(terms) then
         rhs := Expression.REAL(0.0);
       else
-        rhs := List.fold(terms, addExp, Expression.REAL(0.0));
+        rhs := List.fold(terms, makeAddExp, Expression.REAL(0.0));
       end if;
 
       // Build the equation: lhs = rhs
       eq := NBEquation.Equation.makeAssignment(lhs, rhs, Pointer.create(i-1), "ODE_JAC_ADJ", NBEquation.Iterator.EMPTY(), BackendDAE.EquationAttributes.default(NBEquation.EquationKind.CONTINUOUS, false));
-      eqs := eq :: eqs;
+      newEquations := eq :: newEquations;
     end for;
+    newEquations := listReverse(newEquations);
 
-    newEquations := listReverse(eqs);
   end buildJacobianEquationsFromTransposed;
 
   protected function jacobianSymbolicAdjointFromSymbolic
@@ -967,26 +935,21 @@ protected
     list<Pointer<NBVariable.Variable>> seedPtrList, pDerPtrList;
     Pointer<NBVariable.Variable> seedPtr;
     Option<Pointer<NBVariable.Variable>> pDER;
-    list<Expression> seedCrefExprs = {}, pDerCrefExprs = {};
     array<NBStrongComponent.StrongComponent> comps;
-    Integer nComps, si, eqi, s;
+    list<StrongComponent> newEquationsSC = {};
+    Integer nComps, eqi, s;
+    ComponentRef seedVarName;
     Pointer<Equation> eqPtr;
     Equation eq;
     NBackendDAE.Expression eqExp;
     UnorderedMap<ComponentRef, Expression> replaceMap;
-    list<list<Expression>> results = {};
-    list<Expression> singleEqResults;
-
-    list<list<Expression>> aT;
-    list<Pointer<NBEquation.Equation>> newEquations;
-    list<StrongComponent> newEquationsSC = {};
+    list<list<Expression>> results = {}, perEquationPerSeedResultsT = {}, perEquationPerSeedResults = {};
+    list<Expression> seedCrefExprs = {}, pDerCrefExprs = {}, singleEqResults = {};
+    list<Pointer<NBEquation.Equation>> newEquations = {};
     StrongComponent newSC;
     SparsityPattern sparsityPattern;
     SparsityColoring sparsityColoring;
-    list<list<Expression>> perEquationPerSeedResults;
-  algorithm
-    perEquationPerSeedResults := {};
-    
+  algorithm  
     // extract varData and seed variable pointers
     vd := BackendDAE.getVarData(jac);
     print(VarData.toStringVerbose(vd) + "\n");
@@ -999,12 +962,8 @@ protected
     print(VariablePointers.toString(seedVP, "Seeds") + "\n");
     print(VariablePointers.toString(pDerVP, "pDers") + "\n");
     // build seed cref expressions for easy matching: Expression.CREF(cref)
-    for si in 1:listLength(seedPtrList) loop
-      seedCrefExprs := Expression.CREF(NFType.REAL(), BVariable.getVarName(listGet(seedPtrList, si))) :: seedCrefExprs;
-      pDerCrefExprs := Expression.CREF(NFType.REAL(), BVariable.getVarName(listGet(pDerPtrList, si))) :: pDerCrefExprs;
-    end for;
-    seedCrefExprs := listReverse(seedCrefExprs);
-    pDerCrefExprs := listReverse(pDerCrefExprs);
+    seedCrefExprs := list(Expression.CREF(NFType.REAL(), BVariable.getVarName(s_i)) for s_i in seedPtrList);
+    pDerCrefExprs := list(Expression.CREF(NFType.REAL(), BVariable.getVarName(p_i)) for p_i in pDerPtrList);
 
     print(stringDelimitList(List.map(seedCrefExprs, Expression.toString), ", ") + "\n");
     print(stringDelimitList(List.map(pDerCrefExprs, Expression.toString), ", ") + "\n");
@@ -1023,10 +982,11 @@ protected
       for s in 1:listLength(seedPtrList) loop
         replaceMap := UnorderedMap.new<NBackendDAE.Expression>(NBackendDAE.ComponentRef.hash, NBackendDAE.ComponentRef.isEqual);
         for si in 1:listLength(seedPtrList) loop
+          seedVarName := BVariable.getVarName(listGet(seedPtrList, si));
           if si == s then
-            UnorderedMap.add(BVariable.getVarName(listGet(seedPtrList, si)), Expression.REAL(1.0), replaceMap);
+            UnorderedMap.add(seedVarName, Expression.REAL(1.0), replaceMap);
           else
-            UnorderedMap.add(BVariable.getVarName(listGet(seedPtrList, si)), Expression.REAL(0.0), replaceMap);
+            UnorderedMap.add(seedVarName, Expression.REAL(0.0), replaceMap);
           end if;
         end for;
 
@@ -1036,31 +996,29 @@ protected
 
         eqExp := Equation.getResidualExp(eq);
         eqExp := replaceCrefsInExp(eqExp, replaceMap);
-        eqExp := NFSimplifyExp.simplify(eqExp); // optional simplify step
+        eqExp := NFSimplifyExp.simplify(eqExp);
 
         singleEqResults := eqExp :: singleEqResults;
       end for;
-
       singleEqResults := listReverse(singleEqResults);
+
       results := singleEqResults :: results;
     end for;
-
     perEquationPerSeedResults := listReverse(results);
+    perEquationPerSeedResultsT := List.transposeList(perEquationPerSeedResults);
 
     for row in perEquationPerSeedResults loop
       print("{ " + stringDelimitList(List.map(row, Expression.toString), ", ") + " }\n");
     end for;
-    
     print("Transposed:\n");
-    aT := transposeListOfLists(perEquationPerSeedResults);
-    for row in aT loop
+    for row in perEquationPerSeedResultsT loop
       print("{ " + stringDelimitList(List.map(row, Expression.toString), ", ") + " }\n");
     end for;
 
     // the rows of aT are the new equations, each gets its own seed
     // the columns of aT get the same seed
     // new expressions
-    newEquations := buildJacobianEquationsFromTransposed(pDerPtrList, seedPtrList, aT);
+    newEquations := buildJacobianEquationsFromTransposed(pDerPtrList, seedPtrList, perEquationPerSeedResultsT);
 
 
     // ToDo: handle other component types and take solve status from original component
