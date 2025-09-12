@@ -48,6 +48,8 @@ protected
   import Subscript = NFSubscript;
   import Type = NFType;
   import Variable = NFVariable;
+  import SimplifyExp = NFSimplifyExp;
+  import NFBackendExtension.{VariableKind};
 
   // Backend imports
   import Adjacency = NBAdjacency;
@@ -937,6 +939,132 @@ public
         status    = NBSolve.Status.UNPROCESSED);
     end if;
   end createSliceOrSingle;
+
+
+  function inlinePDerTemporaries
+    "Given differentiated strong components (each a SINGLE_COMPONENT assigning a $pDER var),
+     inline all RHS occurrences of temporary $pDER variables into the RHS of the
+     'final' pDER equations (state-derivative pDERs) and drop the temporary ones.
+
+     Example in:
+       $pDER_ODE_JAC.z       = $SEED_ODE_JAC.x * y + x * $SEED_ODE_JAC.y
+       $pDER_ODE_JAC.$DER.x  = a * $SEED_ODE_JAC.x - b * $pDER_ODE_JAC.z
+       $pDER_ODE_JAC.$DER.y  = c * $SEED_ODE_JAC.y + d * $pDER_ODE_JAC.z
+
+     Example out:
+       $pDER_ODE_JAC.$DER.x  = a * $SEED_ODE_JAC.x - b * ($SEED_ODE_JAC.x * y + x * $SEED_ODE_JAC.y)
+       $pDER_ODE_JAC.$DER.y  = c * $SEED_ODE_JAC.y + d * ($SEED_ODE_JAC.x * y + x * $SEED_ODE_JAC.y)
+
+     Heuristic:
+       - A pDER variable that is NOT a state derivative (BVariable.isStateDerivative)
+         is treated as an inline-able temporary.
+       - State-derivative pDER equations are kept and have temporaries expanded.
+    "
+    input array<StrongComponent> compsIn;
+    output array<StrongComponent> compsOut;
+  protected
+    // Map: temporary pDER cref -> its RHS expression (fully expanded later)
+    UnorderedMap<ComponentRef, Expression> tempMap = UnorderedMap.new<Expression>(ComponentRef.hash, ComponentRef.isEqual);
+
+    // Accumulate kept (final) strong components after inlining
+    list<StrongComponent> keptComps = {};
+
+    // Work variables
+    StrongComponent sc;
+    Pointer<NBEquation.Equation> eqPtr;
+    NBEquation.Equation eqn;
+    Pointer<Variable> varPtr;
+    ComponentRef lhsCref;
+    Expression lhsExp, rhsExp, newRhs;
+    Integer i, newIdx = 0;
+
+    // For building new equation pointers
+    Pointer<NBEquation.Equation> newEqPtr;
+    StrongComponent newSc;
+
+    // recursive inliner that does NOT capture outer vars implicitly
+    function inlineExp
+      input UnorderedMap<ComponentRef, Expression> tMap;
+      input Expression e;
+      output Expression oe;
+    protected
+      ComponentRef c;
+      Expression repl;
+    algorithm
+      // If e is a cref that is a temporary, inline its definition and recurse
+      if Expression.isCref(e) then
+        c := Expression.toCref(e);
+        if UnorderedMap.contains(c, tMap) then
+          repl := UnorderedMap.getOrFail(c, tMap);
+          oe := inlineExp(tMap, repl);
+          return;
+        end if;
+      end if;
+      // Otherwise map children and rebuild
+      oe := NFExpression.mapShallow(e, function inlineExp(tMap = tMap));
+    end inlineExp;
+
+  algorithm
+    // First pass: collect temporaries (non state-derivative pDERs)
+    for i in 1:arrayLength(compsIn) loop
+      sc := compsIn[i];
+      () := match sc
+        // Only SINGLE_COMPONENT expected here
+        case StrongComponent.SINGLE_COMPONENT(var = varPtr, eqn = eqPtr)
+          algorithm
+            eqn := Pointer.access(eqPtr);
+            // LHS & RHS (fall back to residual if accessor incomplete)
+            lhsExp := NBEquation.Equation.getLHS(eqn);
+            rhsExp := NBEquation.Equation.getRHS(eqn);
+            lhsCref := Expression.toCref(lhsExp);
+
+            if not BVariable.isStateDerivative(varPtr) then
+              // Treat as temporary -> store RHS in map
+              UnorderedMap.add(lhsCref, rhsExp, tempMap);
+            end if;
+        then ();
+        else ();
+      end match;
+    end for;
+
+    // Second pass: rebuild only state-derivative pDER equations with inlined temporaries
+    for i in 1:arrayLength(compsIn) loop
+      sc := compsIn[i];
+      () := match sc
+        case StrongComponent.SINGLE_COMPONENT(var = varPtr, eqn = eqPtr)
+          algorithm
+            if BVariable.isJacVar(varPtr) then
+              eqn := Pointer.access(eqPtr);
+              lhsExp := NBEquation.Equation.getLHS(eqn);
+              rhsExp := NBEquation.Equation.getRHS(eqn);
+
+              // Inline
+              newRhs := inlineExp(tempMap, rhsExp);
+              newRhs := SimplifyExp.simplify(newRhs);
+
+              // Build new assignment equation (reuse LHS; give deterministic index)
+              newEqPtr := NBEquation.Equation.makeAssignment(
+                lhsExp,
+                newRhs,
+                Pointer.create(newIdx),
+                "JAC_INLINE",
+                NBEquation.Iterator.EMPTY(),
+                BackendDAE.EquationAttributes.default(NBEquation.EquationKind.CONTINUOUS, false)
+              );
+              newIdx := newIdx + 1;
+
+              // Preserve solve status; assume EXPLICIT if not accessible
+              newSc := StrongComponent.SINGLE_COMPONENT(varPtr, newEqPtr, NBSolve.Status.EXPLICIT);
+              keptComps := newSc :: keptComps;
+            end if;
+        then ();
+        else ();
+      end match;
+    end for;
+
+    // Output array (reverse to preserve original order of kept derivatives)
+    compsOut := listArray(listReverse(keptComps));
+  end inlinePDerTemporaries;
 
   // ############################################################
   //                Protected Functions and Types

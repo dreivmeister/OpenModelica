@@ -126,10 +126,19 @@ public
     function toString
       input DifferentiationArguments diffArgs;
       output String str = "[" + diffTypeStr(diffArgs.diffType) + "]";
+    protected
+      ComponentRef k, v;
     algorithm
       if diffArgs.diffType == DifferentiationType.SIMPLE then
         str := str + " " + ComponentRef.toString(diffArgs.diffCref);
       end if;
+      // append number of newly created variables
+      str := str + " new_vars=" + intString(listLength(diffArgs.new_vars));
+      // indicate whether a diff_map is present
+      for tpl in UnorderedMap.toList(Util.getOption(diffArgs.diff_map)) loop
+        (k, v) := tpl;
+        print("  " + ComponentRef.toString(k) + " -> " + ComponentRef.toString(v) + "\n");
+      end for;
     end toString;
 
     function diffTypeStr
@@ -397,6 +406,7 @@ public
 
   */
     if Flags.isSet(Flags.DEBUG_DIFFERENTIATION) and not stringEqual(name, "") then
+      print("in equation\n" + DifferentiationArguments.toString(diffArguments) + "\n");
       eq := Equation.simplify(eq, name, "\t");
       print("[AFTER ] " + Equation.toString(eq) + "\n\n");
     else

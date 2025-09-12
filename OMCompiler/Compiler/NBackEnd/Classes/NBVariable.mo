@@ -363,6 +363,15 @@ public
     end match;
   end isStateDerivative;
 
+  function isJacVar
+    extends checkVar;
+  algorithm
+    b := match var.backendinfo.varKind
+      case VariableKind.JAC_VAR() then true;
+      else false;
+    end match;
+  end isJacVar;
+
   function isAlgebraic
     extends checkVar;
   algorithm
