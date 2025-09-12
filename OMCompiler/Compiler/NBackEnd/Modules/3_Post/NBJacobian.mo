@@ -275,6 +275,7 @@ public
     func := match Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN)
       case "symbolic" then jacobianSymbolic;
       case "adjoint" then jacobianSymbolic;
+      case "parameter" then jacobianSymbolicParameters;
       case "numeric"  then jacobianNumeric;
       case "none"     then jacobianNone;
     end match;
@@ -809,6 +810,112 @@ protected
     end if;
   end jacobianSymbolic;
 
+  function jacobianSymbolicParameters
+    "Parameter Jacobian: seeds = parameters, partials = usual residual/state-derivative vars.
+     Produces d(f)/dp (where f are residuals producing x' or algebraic residuals)."
+    extends Module.jacobianInterface;
+  protected
+    list<StrongComponent> comps, diffed_comps;
+    Pointer<list<Pointer<Variable>>> seed_vars_ptr = Pointer.create({});
+    Pointer<list<Pointer<Variable>>> pDer_vars_ptr = Pointer.create({});
+    UnorderedMap<ComponentRef,ComponentRef> diff_map = UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
+    Differentiate.DifferentiationArguments diffArguments;
+    Pointer<Integer> idx = Pointer.create(0);
+
+    list<Pointer<Variable>> all_vars, unknown_vars, aux_vars, alias_vars, depend_vars, res_vars, tmp_vars, seed_vars, param_vars;
+    BVariable.VarData varDataJac;
+    SparsityPattern sparsityPattern;
+    SparsityColoring sparsityColoring;
+
+    BVariable.checkVar tmpFilter = getTmpFilterFunction(jacType);
+  algorithm
+    if Util.isSome(strongComponents) then
+      comps := list(c for c guard(not StrongComponent.isDiscrete(c)) in Util.getOption(strongComponents));
+    else
+      Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " param jacobian: missing strong components."}); fail();
+    end if;
+
+    // 1. Collect parameters from knowns (or all vars if needed)
+    param_vars := list(v for v guard (BVariable.isParam(v)) in VariablePointers.toList(knowns));
+
+    // 2. Make seed (parameter) variables
+    // for v in param_vars loop
+    //   makeVarTraverse(v, name, seed_vars_ptr, diff_map, BVariable.makeSeedVar, init);
+    // end for;
+    // seed_vars := Pointer.access(seed_vars_ptr);
+
+    for v in param_vars loop
+      makeParamSeedVarTraverse(v, name, seed_vars_ptr, diff_map);
+    end for;
+    seed_vars := Pointer.access(seed_vars_ptr);
+
+    // 3. Build pDer variables exactly like normal jacobian (rows = residual/state-derivatives)
+    (res_vars, tmp_vars) := List.splitOnTrue(VariablePointers.toList(partialCandidates), tmpFilter);
+    (tmp_vars, _) := List.splitOnTrue(tmp_vars, function BVariable.isContinuous(init = init));
+
+    for v in res_vars loop
+      makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init);
+    end for;
+    res_vars := Pointer.access(pDer_vars_ptr);
+
+    pDer_vars_ptr := Pointer.create({});
+    for v in tmp_vars loop
+      makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = true), init);
+    end for;
+    tmp_vars := Pointer.access(pDer_vars_ptr);
+
+    // 4. Diff arguments (JACOBIAN mode with param seeds)
+    diffArguments := Differentiate.DIFFERENTIATION_ARGUMENTS(
+      diffCref        = ComponentRef.EMPTY(),
+      new_vars        = {},
+      diff_map        = SOME(diff_map),
+      diffType        = NBDifferentiate.DifferentiationType.JACOBIAN,
+      funcTree        = funcTree,
+      scalarized      = seedCandidates.scalarized   // reuse flag (seedCandidates passed in call can be dummy)
+    );
+
+    (diffed_comps, diffArguments) := Differentiate.differentiateStrongComponentList(comps, diffArguments, idx, name, getInstanceName());
+    funcTree := diffArguments.funcTree;
+
+    // 5. Assemble VarData (rows = residuals, columns = params)
+    unknown_vars  := listAppend(res_vars, tmp_vars);
+    all_vars      := unknown_vars;
+    aux_vars      := seed_vars;
+    alias_vars    := {};
+    depend_vars   := {};
+
+    varDataJac := BVariable.VAR_DATA_JAC(
+      variables     = VariablePointers.fromList(all_vars),
+      unknowns      = VariablePointers.fromList(unknown_vars),
+      knowns        = knowns,
+      auxiliaries   = VariablePointers.fromList(aux_vars),
+      aliasVars     = VariablePointers.fromList(alias_vars),
+      diffVars      = partialCandidates,
+      dependencies  = VariablePointers.fromList(depend_vars),
+      resultVars    = VariablePointers.fromList(res_vars),
+      tmpVars       = VariablePointers.fromList(tmp_vars),
+      seedVars      = VariablePointers.fromList(seed_vars)      // parameters
+    );
+
+    // 6. Sparsity pattern: seeds = params, partials = original unknowns
+    (sparsityPattern, sparsityColoring) := SparsityPattern.create(
+      VariablePointers.fromList(param_vars, partialCandidates.scalarized),
+      partialCandidates,
+      strongComponents,
+      jacType
+    );
+
+    jacobian := SOME(BackendDAE.JACOBIAN(
+      name              = name + "_PAR",
+      jacType           = jacType,
+      varData           = varDataJac,
+      comps             = listArray(diffed_comps),
+      sparsityPattern   = sparsityPattern,
+      sparsityColoring  = sparsityColoring
+    ));
+  end jacobianSymbolicParameters;
+
+
   protected function buildJacobianEquationsFromTransposed
     "Constructs new jacobian equations from a transposed coefficient matrix.
     Each row of the transposed matrix becomes an equation:
@@ -1278,6 +1385,41 @@ protected
       end match;
     end if;
   end makeVarTraverse;
+
+
+  function makeParamSeedVarTraverse
+    "Create a seed variable for a parameter (do NOT check continuity)."
+    input Pointer<Variable> var_ptr;
+    input String name;
+    input Pointer<list<Pointer<Variable>>> vars_ptr;
+    input UnorderedMap<ComponentRef,ComponentRef> map;
+  protected
+    Variable var = Pointer.access(var_ptr);
+    ComponentRef diff, parent_name, diff_parent_name;
+    Pointer<Variable> diff_ptr, parent, diff_parent;
+  algorithm
+    // always create a seed for parameters
+    (diff, diff_ptr) := BVariable.makeSeedVar(var.name, name);
+    Pointer.update(vars_ptr, diff_ptr :: Pointer.access(vars_ptr));
+    UnorderedMap.add(var.name, diff, map);
+
+    // keep parent relation (copy from makeVarTraverse but without continuity guard)
+    _ := match BVariable.getParent(var_ptr)
+      case SOME(parent) algorithm
+        parent_name := BVariable.getVarName(parent);
+        diff_parent := match UnorderedMap.get(parent_name, map)
+          case SOME(diff_parent_name) then BVariable.getVarPointer(diff_parent_name, sourceInfo());
+          else algorithm
+            (diff_parent_name, _) := BVariable.makeSeedVar(parent_name, name);
+            UnorderedMap.add(parent_name, diff_parent_name, map);
+          then BVariable.getVarPointer(diff_parent_name, sourceInfo());
+        end match;
+        BVariable.addRecordChild(diff_parent, diff_ptr);
+        diff_ptr := BVariable.setParent(diff_ptr, diff_parent);
+      then ();
+      else ();
+    end match;
+  end makeParamSeedVarTraverse;
 
   protected function replaceCrefsInExp
     "Replaces all occurrences of crefs in an expression according to the given map."
