@@ -2243,6 +2243,16 @@ public
     end match;
   end getName;
 
+  function getCref
+    "Returns the cref of an Expression, if it has one."
+    input Expression exp;
+    output Option<ComponentRef> cref;
+  algorithm
+    cref := match exp
+      case CREF() then SOME(exp.cref);
+    end match;
+  end getCref;
+
   function enumLiteralPath
     input Expression exp;
     output Absyn.Path path;

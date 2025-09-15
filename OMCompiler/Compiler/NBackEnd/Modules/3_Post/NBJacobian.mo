@@ -276,6 +276,7 @@ public
       case "symbolic" then jacobianSymbolic;
       case "adjoint" then jacobianSymbolic;
       case "parameter" then jacobianSymbolicParameters;
+      case "parameteradjoint" then jacobianSymbolicParameters;
       case "numeric"  then jacobianNumeric;
       case "none"     then jacobianNone;
     end match;
@@ -680,7 +681,7 @@ protected
   protected
     JacobianType jacType;
     VariablePointers unknowns;
-    list<Pointer<Variable>> derivative_vars, state_vars;
+    list<Pointer<Variable>> derivative_vars, state_vars, param_vars;
     VariablePointers seedCandidates, partialCandidates;
     Option<Jacobian> jacobian                             "Resulting jacobian";
     Partition.Kind kind = Partition.Partition.getKind(part);
@@ -690,8 +691,14 @@ protected
     jacType   := if Partition.Partition.getKind(part) == NBPartition.Kind.DAE then JacobianType.DAE else JacobianType.ODE;
 
     derivative_vars := list(var for var guard(BVariable.isStateDerivative(var)) in VariablePointers.toList(unknowns));
-    state_vars := list(Util.getOption(BVariable.getVarState(var)) for var in derivative_vars);
-    seedCandidates := VariablePointers.fromList(state_vars, partialCandidates.scalarized);
+
+    if Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN) == "parameter" or Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN) == "parameteradjoint" then
+      param_vars := list(var for var guard (BVariable.isParam(var)) in VariablePointers.toList(knowns));
+      seedCandidates := VariablePointers.fromList(param_vars, partialCandidates.scalarized);
+    else
+      state_vars := list(Util.getOption(BVariable.getVarState(var)) for var in derivative_vars);
+      seedCandidates := VariablePointers.fromList(state_vars, partialCandidates.scalarized);
+    end if;
 
     (jacobian, funcTree) := func(name, jacType, seedCandidates, partialCandidates, part.equations, knowns, part.strongComponents, funcTree, kind ==  NBPartition.Kind.INI);
 
@@ -793,7 +800,7 @@ protected
 
     // use jacobian to generate adjoint jacobian if requested
     if Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN) == "adjoint" then
-      // inline componentes to avoid issues with pDer temporaries
+      // inline componentes to avoid issues with pDer temporaries (only when temps exist)
       inlined_comps := StrongComponent.inlinePDerTemporaries(listArray(diffed_comps));
 
       jacobian := SOME(Jacobian.JACOBIAN(
@@ -805,8 +812,7 @@ protected
       sparsityColoring  = sparsityColoring
       ));
 
-      //jacobian := jacobianSymbolicAdjointFromSymbolic(Util.getOption(jacobian), strongComponents, varDataJac, seedCandidates, partialCandidates, jacType, name);
-      jacobian := jacobianSymbolicAdjointFromSymbolicSeeds(Util.getOption(jacobian), strongComponents, varDataJac, seedCandidates, partialCandidates, jacType, name);
+      jacobian := jacobianSymbolicAdjointFromSymbolic(Util.getOption(jacobian), strongComponents, varDataJac, seedCandidates, partialCandidates, jacType, name);
     end if;
   end jacobianSymbolic;
 
@@ -828,6 +834,7 @@ protected
     SparsityColoring sparsityColoring;
 
     BVariable.checkVar tmpFilter = getTmpFilterFunction(jacType);
+    array<StrongComponent> inlined_comps;
   algorithm
     if Util.isSome(strongComponents) then
       comps := list(c for c guard(not StrongComponent.isDiscrete(c)) in Util.getOption(strongComponents));
@@ -837,12 +844,6 @@ protected
 
     // 1. Collect parameters from knowns (or all vars if needed)
     param_vars := list(v for v guard (BVariable.isParam(v)) in VariablePointers.toList(knowns));
-
-    // 2. Make seed (parameter) variables
-    // for v in param_vars loop
-    //   makeVarTraverse(v, name, seed_vars_ptr, diff_map, BVariable.makeSeedVar, init);
-    // end for;
-    // seed_vars := Pointer.access(seed_vars_ptr);
 
     for v in param_vars loop
       makeParamSeedVarTraverse(v, name, seed_vars_ptr, diff_map);
@@ -913,6 +914,29 @@ protected
       sparsityPattern   = sparsityPattern,
       sparsityColoring  = sparsityColoring
     ));
+
+    // use jacobian to generate adjoint jacobian if requested
+    if Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN) == "parameteradjoint" then
+      // inline componentes to avoid issues with pDer temporaries
+      inlined_comps := StrongComponent.inlinePDerTemporaries(listArray(diffed_comps));
+
+      if Flags.isSet(Flags.JAC_DUMP) then
+        // inlined components to string and print
+        print("Inlined components for parameter adjoint jacobian:\n");
+        print(List.toString(arrayList(inlined_comps), function NBStrongComponent.toString(index = -1)) + "\n");
+      end if;
+
+      jacobian := SOME(Jacobian.JACOBIAN(
+        name              = name + "_PAR",
+        jacType           = jacType,
+        varData           = varDataJac,
+        comps             = inlined_comps,
+        sparsityPattern   = sparsityPattern,
+        sparsityColoring  = sparsityColoring
+      ));
+
+      jacobian := jacobianSymbolicAdjointFromSymbolic(Util.getOption(jacobian), strongComponents, varDataJac, seedCandidates, partialCandidates, jacType, name);
+    end if;
   end jacobianSymbolicParameters;
 
 
@@ -924,14 +948,14 @@ protected
     - newSeedVars: list of seed variable pointers (RHS, one per column)
     - coeffsT: transposed coefficient matrix (coeffsT[i][j] is coefficient for resultVar[i], seedVar[j])
     Returns: list of new NBEquation.Equation equations."
-    input list<VariablePointer> newResultVars;
-    input list<VariablePointer> newSeedVars;
+    input list<Expression> newResultVars;
+    input list<Expression> newSeedVars;
     input list<list<Expression>> coeffsT;
     output list<EquationPointer> newEquations;
   protected
     Integer nRows, nCols, i, j;
     VariablePointer resVarPtr, seedVarPtr;
-    Expression lhs, rhs, term;
+    Expression lhs, rhs, term, seedVar;
     list<Expression> row, terms;
     EquationPointer eq;
   algorithm
@@ -941,12 +965,11 @@ protected
 
     for i in 1:nRows loop
       row := listGet(coeffsT, i);
-      resVarPtr := listGet(newResultVars, i);
-      lhs := Expression.CREF(BVariable.getVarType(resVarPtr), BVariable.getVarName(resVarPtr));
+      // lhs := Expression.CREF(BVariable.getVarType(resVarPtr), BVariable.getVarName(resVarPtr));
 
       terms := {};
       for j in 1:nCols loop
-        seedVarPtr := listGet(newSeedVars, j);
+        seedVar := listGet(newSeedVars, j);
         // get the coefficient
         term := listGet(row, j);
         // skip zero coefficients
@@ -955,7 +978,7 @@ protected
           term := Expression.BINARY(
             term,
             Operator.makeMul(Type.REAL()),
-            Expression.CREF(BVariable.getVarType(seedVarPtr), BVariable.getVarName(seedVarPtr))
+            seedVar
           );
           terms := term :: terms;
         end if;
@@ -969,12 +992,51 @@ protected
       end if;
 
       // Build the equation: lhs = rhs
+      lhs := listGet(newResultVars, i);
       eq := BEquation.Equation.makeAssignment(lhs, rhs, Pointer.create(i-1), "ODE_JAC_ADJ", BEquation.Iterator.EMPTY(), BackendDAE.EquationAttributes.default(NBEquation.EquationKind.CONTINUOUS, false));
       newEquations := eq :: newEquations;
     end for;
     newEquations := listReverse(newEquations);
-
   end buildJacobianEquationsFromTransposed;
+
+
+  protected function transposeSeedAndPDerCrefs
+    "Given lists of seed CREF expressions and pDer CREF expressions,
+    returns the 'transposed' lists with inferred SEED and pDER prefixes:
+    - newSeeds: <seedPrefix><baseName> for each original pDer
+    - newPders: <pDerPrefix><baseName> for each original seed"
+    input list<VariablePointer> seedCrefExprs;
+    input list<VariablePointer> pDerCrefExprs;
+    output list<Expression> newSeedCrefExprs;
+    output list<Expression> newPDerCrefExprs;
+  protected
+    String seedPrefix, pDerPrefix, baseName, fullName;
+    ComponentRef base, newSeed, newPDer;
+
+    Expression e;
+    Type ty;
+    Integer prefixLen;
+  algorithm
+    // New seeds: wrap each pDer cref name in seedPrefix
+    newSeedCrefExprs := {};
+    for e in pDerCrefExprs loop
+      ty := BVariable.getVarType(e);
+      base := BVariable.getVarName(e);
+      (newSeed, _) := BVariable.makeSeedVar(base, "ODE_JAC_ADJ");
+      newSeedCrefExprs := Expression.CREF(ty, newSeed) :: newSeedCrefExprs;
+    end for;
+    newSeedCrefExprs := listReverse(newSeedCrefExprs);
+
+    // New pDers: wrap each seed cref name in pDerPrefix
+    newPDerCrefExprs := {};
+    for e in seedCrefExprs loop
+      ty := BVariable.getVarType(e);
+      base := BVariable.getVarName(e);
+      (newPDer, _) := BVariable.makePDerVar(base, "ODE_JAC_ADJ", false);
+      newPDerCrefExprs := Expression.CREF(ty, newPDer) :: newPDerCrefExprs;
+    end for;
+    newPDerCrefExprs := listReverse(newPDerCrefExprs);
+  end transposeSeedAndPDerCrefs;
 
   protected function jacobianSymbolicAdjointFromSymbolic
     "For a JACOBIAN backendDAE: iterate all strong components and for each
@@ -997,23 +1059,54 @@ protected
     Integer eqi, s;
     ComponentRef seedVarName;
     Pointer<Equation> eqPtr;
-    Expression eqExp;
+    Expression eqExp, pder;
     UnorderedMap<ComponentRef, Expression> replaceMap;
     list<list<Expression>> coeffsT = {}, coeffs = {};
-    list<Expression> seedCrefExprs = {}, pDerCrefExprs = {}, singleEqResults = {};
+    list<Expression> seedCrefExprs = {}, pDerCrefExprs = {};
+    list<Expression> singleEqResults = {};
     list<EquationPointer> newEquations = {};
     StrongComponent diffed_comp;
     SparsityPattern sparsityPattern;
     SparsityColoring sparsityColoring;
+    list<VariablePointer> newSeedPtrList, newPDerPtrList;
   algorithm  
     // extract varData and seed variable pointers
     vd := BackendDAE.getVarData(jac);
     // adjust field access if your VarData record uses different field name
     seedPtrList := VariablePointers.toList(VarData.getSeeds(vd));
     pDerPtrList := VariablePointers.toList(VarData.getUnknowns(vd));
+
+    print("seedCandidates:\n");
+    for v in VariablePointers.toList(seedCandidates) loop
+      print("  " + ComponentRef.toString(BVariable.getVarName(v)) + "\n");
+    end for;
+
+    // Print partialCandidates
+    print("partialCandidates:\n");
+    for v in VariablePointers.toList(partialCandidates) loop
+      print("  " + ComponentRef.toString(BVariable.getVarName(v)) + "\n");
+    end for;
     // build seed cref expressions for easy matching: Expression.CREF(cref)
-    seedCrefExprs := list(Expression.CREF(Type.REAL(), BVariable.getVarName(s_i)) for s_i in seedPtrList);
-    pDerCrefExprs := list(Expression.CREF(Type.REAL(), BVariable.getVarName(p_i)) for p_i in pDerPtrList);
+    seedCrefExprs := list(Expression.CREF(Type.REAL(), BVariable.getVarName(s_i)) for s_i in seedPtrList); // length is number of seeds
+    if Flags.isSet(Flags.JAC_DUMP) then
+      print("Jacobian original seeds:\n");
+      print(
+        StringUtil.stringDelimitList(
+          List.map(seedCrefExprs, Expression.toString),
+          ", "
+        ) + "\n"
+      );
+    end if;
+    pDerCrefExprs := list(Expression.CREF(Type.REAL(), BVariable.getVarName(p_i)) for p_i in pDerPtrList); // length is number of equations
+    if Flags.isSet(Flags.JAC_DUMP) then
+      print("Jacobian original pders:\n");
+      print(
+        StringUtil.stringDelimitList(
+          List.map(pDerCrefExprs, Expression.toString),
+          ", "
+        ) + "\n"
+      );
+    end if;
 
     // iterate strong components; get array and its length
     comps := BackendDAE.getComponents(jac);
@@ -1050,39 +1143,104 @@ protected
     // transpose the coefficient matrix
     coeffsT := List.transposeList(coeffs);
 
+
+    if Flags.isSet(Flags.JAC_DUMP) then
+      print("Jacobian adjoint coefficient matrix (transposed):\n");
+      for row in coeffsT loop
+        for e in row loop
+          print(Expression.toString(e) + " ");
+        end for;
+        print("\n");
+      end for;
+    end if;
+
+    // now we need new seedPtrList and pDerPtrList for the adjoint jacobian
+    // with number of seeds = number of columns in coeffsT
+    // and number of equations = number of rows in coeffsT
+    (seedCrefExprs, pDerCrefExprs) := transposeSeedAndPDerCrefs(VariablePointers.toList(seedCandidates), VariablePointers.toList(partialCandidates));
+
+    if Flags.isSet(Flags.JAC_DUMP) then
+      print("Jacobian transposed seeds:\n");
+      print(
+        StringUtil.stringDelimitList(
+          List.map(seedCrefExprs, Expression.toString),
+          ", "
+        ) + "\n"
+      );
+    end if;
+    if Flags.isSet(Flags.JAC_DUMP) then
+      print("Jacobian transposed pders:\n");
+      print(
+        StringUtil.stringDelimitList(
+          List.map(pDerCrefExprs, Expression.toString),
+          ", "
+        ) + "\n"
+      );
+    end if;
+
     // the rows of coeffsT are the new equations, each element per row gets its own seed
     // the columns of coeffsT get the same seed
-    newEquations := buildJacobianEquationsFromTransposed(pDerPtrList, seedPtrList, coeffsT);
+    newEquations := buildJacobianEquationsFromTransposed(pDerCrefExprs, seedCrefExprs, coeffsT);
+
+    // print new equations
+    print("Jacobian adjoint equations:\n");
+    for eqPtr in newEquations loop
+      print(NBEquation.Equation.toString(Pointer.access(eqPtr)) + "\n");
+    end for;
+
+
+    newPDerPtrList := {};
+    for e in pDerCrefExprs loop
+      newPDerPtrList := Pointer.create(Variable.fromCref(Util.getOption(Expression.getCref(e)))) :: newPDerPtrList;
+    end for;
+    newPDerPtrList := listReverse(newPDerPtrList);
 
     // ToDo: handle other component types and take solve status from original component
     for i in 1:listLength(newEquations) loop
+      pder := listGet(pDerCrefExprs, i);
       diffed_comp := StrongComponent.SINGLE_COMPONENT(
-        listGet(pDerPtrList, i),
+        Pointer.create(Variable.fromCref(Util.getOption(Expression.getCref(pder)))),
         listGet(newEquations, i),
         NBSolve.Status.EXPLICIT
       );
       diffed_comps := diffed_comp :: diffed_comps;
     end for;
     diffed_comps_array := listArray(diffed_comps);
+
+
+    print("Jacobian diffed comps:\n");
+    for comp in diffed_comps_array loop
+      print(StrongComponent.toString(comp) + "\n");
+    end for;
+    print("##################\n");
     
     // (sparsityPattern, sparsityColoring) := SparsityPattern.create(seedCandidates, partialCandidates, SOME(listArray(listReverse(newEquationsSC))), jacType);
     // assume full dependency for now (lazy)
-    (sparsityPattern, sparsityColoring) := SparsityPattern.lazy(seedCandidates, partialCandidates, SOME(diffed_comps_array), jacType);
+    (sparsityPattern, sparsityColoring) := SparsityPattern.lazy(partialCandidates, seedCandidates, SOME(diffed_comps_array), jacType);
+
+    vd := BVariable.VarData.setDiffVars(vd, partialCandidates);
+    vd := BVariable.VarData.setUnknowns(vd, VariablePointers.fromList(newPDerPtrList));
+    vd := BVariable.VarData.setResultVars(vd, VariablePointers.fromList(newPDerPtrList));
+    newSeedPtrList := {};
+    for e in seedCrefExprs loop
+      newSeedPtrList := Pointer.create(Variable.fromCref(Util.getOption(Expression.getCref(e)))) :: newSeedPtrList;
+    end for;
+    newSeedPtrList := listReverse(newSeedPtrList);
+    vd := BVariable.VarData.setSeedVars(vd, VariablePointers.fromList(newSeedPtrList));
 
     jacobian := SOME(Jacobian.JACOBIAN(
       name              = name,
       jacType           = jacType,
-      varData           = varDataJac,
+      varData           = vd,
       comps             = diffed_comps_array,
       sparsityPattern   = sparsityPattern,
       sparsityColoring  = sparsityColoring
     ));
 
-
-
-
     if Flags.isSet(Flags.JAC_DUMP) then
       print("Jacobian adjoint:\n" + NBJacobian.toString(Util.getOption(jacobian), " ") + "\n");
+
+      print("Jacobian adjoint VarData:\n" + BVariable.VarData.toStringVerbose(vd, true) + "\n");
     end if;
   end jacobianSymbolicAdjointFromSymbolic;
 

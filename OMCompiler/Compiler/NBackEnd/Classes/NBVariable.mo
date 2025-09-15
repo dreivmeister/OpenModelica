@@ -2500,6 +2500,46 @@ public
       end match;
     end setVariables;
 
+    function setDiffVars
+      input output VarData varData;
+      input VariablePointers variables;
+    algorithm
+      varData := match varData
+        case VAR_DATA_JAC() algorithm varData.diffVars := variables; then varData;
+        else fail();
+      end match;
+    end setDiffVars;
+
+    function setResultVars
+      input output VarData varData;
+      input VariablePointers variables;
+    algorithm
+      varData := match varData
+        case VAR_DATA_JAC() algorithm varData.resultVars := variables; then varData;
+        else fail();
+      end match;
+    end setResultVars;
+
+    function setSeedVars
+      input output VarData varData;
+      input VariablePointers variables;
+    algorithm
+      varData := match varData
+        case VAR_DATA_JAC() algorithm varData.seedVars := variables; then varData;
+        else fail();
+      end match;
+    end setSeedVars;
+
+    function setUnknowns
+      input output VarData varData;
+      input VariablePointers variables;
+    algorithm
+      varData := match varData
+        case VAR_DATA_JAC() algorithm varData.unknowns := variables; then varData;
+        else fail();
+      end match;
+    end setUnknowns;
+
     function getStateOrder
       input VarData varData;
       output UnorderedMap<ComponentRef, ComponentRef> state_order;

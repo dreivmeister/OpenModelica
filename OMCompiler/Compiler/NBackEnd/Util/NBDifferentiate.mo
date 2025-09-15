@@ -132,13 +132,13 @@ public
       if diffArgs.diffType == DifferentiationType.SIMPLE then
         str := str + " " + ComponentRef.toString(diffArgs.diffCref);
       end if;
-      // append number of newly created variables
-      str := str + " new_vars=" + intString(listLength(diffArgs.new_vars));
-      // indicate whether a diff_map is present
-      for tpl in UnorderedMap.toList(Util.getOption(diffArgs.diff_map)) loop
-        (k, v) := tpl;
-        print("  " + ComponentRef.toString(k) + " -> " + ComponentRef.toString(v) + "\n");
-      end for;
+      // print the diff map if it exists
+      if Util.isSome(diffArgs.diff_map) then
+        for tpl in UnorderedMap.toList(Util.getOption(diffArgs.diff_map)) loop
+          (k, v) := tpl;
+          print("  " + ComponentRef.toString(k) + " -> " + ComponentRef.toString(v) + "\n");
+        end for;
+      end if;
     end toString;
 
     function diffTypeStr
@@ -406,7 +406,6 @@ public
 
   */
     if Flags.isSet(Flags.DEBUG_DIFFERENTIATION) and not stringEqual(name, "") then
-      print("in equation\n" + DifferentiationArguments.toString(diffArguments) + "\n");
       eq := Equation.simplify(eq, name, "\t");
       print("[AFTER ] " + Equation.toString(eq) + "\n\n");
     else
@@ -707,7 +706,7 @@ public
       // Known variables, except for top level inputs have a 0-derivative
       case (Expression.CREF(), _, _)
         guard(BVariable.isParamOrConst(var_ptr) and
-              not (ComponentRef.isTopLevel(exp.cref) and BVariable.isInput(var_ptr)) and not diffArguments.diffType == DifferentiationType.JACOBIAN)
+              not (ComponentRef.isTopLevel(exp.cref) and BVariable.isInput(var_ptr)) and (diffArguments.diffType <> DifferentiationType.JACOBIAN))
       then (Expression.makeZero(exp.ty), diffArguments);
 
       // -------------------------------------
