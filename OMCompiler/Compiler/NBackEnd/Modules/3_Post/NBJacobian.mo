@@ -477,28 +477,6 @@ public
       output SparsityColoring sparsityColoring = EMPTY_SPARSITY_COLORING;
     end createEmpty;
 
-    function transpose
-      input SparsityPattern pattern;
-      input JacobianType jacType;
-      output SparsityPattern transposedPattern;
-      output SparsityColoring transposedColoring;
-    algorithm
-      transposedPattern := SPARSITY_PATTERN(
-        col_wise_pattern  = pattern.row_wise_pattern,
-        row_wise_pattern  = pattern.col_wise_pattern,
-        seed_vars         = pattern.partial_vars,
-        partial_vars      = pattern.seed_vars,
-        nnz               = pattern.nnz
-      );
-
-      print("seed_vars:\n");
-      print(List.toString(pattern.seed_vars, ComponentRef.toString) + "\n");
-      print("partial_vars:\n");
-      print(List.toString(pattern.partial_vars, ComponentRef.toString) + "\n");
-      transposedColoring := SparsityColoring.PartialD2ColoringAlgC(transposedPattern, jacType);
-    end transpose;
-
-
     function transposeRenamed
       "Transpose a sparsity pattern while applying renaming maps:
          oldPartial -> newSeed
