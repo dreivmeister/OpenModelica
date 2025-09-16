@@ -337,19 +337,24 @@ public
     function createSimulationJacobian
       input list<Partition.Partition> partitions;
       output SimJacobian simJac;
+      output SimJacobian simJacAdjoint;
       input output SimCode.SimCodeIndices simCodeIndices;
       input UnorderedMap<ComponentRef, SimVar> simcode_map;
     protected
-      list<BackendDAE> jacobians = {};
-      BackendDAE simJacobian;
-      Option<SimJacobian> simJac_opt;
-      Option<BackendDAE> jacobian;
+      list<BackendDAE> jacobians = {}, jacobiansAdjoint = {};
+      BackendDAE simJacobian, simJacobianAdjoint;
+      Option<SimJacobian> simJac_opt, simJacAdj_opt;
+      Option<BackendDAE> jacobian, jacobianAdjoint;
     algorithm
       for partition in partitions loop
         // save jacobian if existent
         jacobian := Partition.Partition.getJacobian(partition);
+        jacobianAdjoint := Partition.Partition.getJacobianAdjoint(partition);
         if Util.isSome(jacobian) then
           jacobians := Util.getOption(jacobian) :: jacobians;
+        end if;
+        if Util.isSome(jacobianAdjoint) then
+          jacobiansAdjoint := Util.getOption(jacobianAdjoint) :: jacobiansAdjoint;
         end if;
       end for;
 
@@ -363,6 +368,20 @@ public
           simJac := Util.getOption(simJac_opt);
         else
           (simJac, simCodeIndices) := SimJacobian.empty("A", simCodeIndices);
+        end if;
+      end if;
+
+      // create empty adjoint jacobian as fallback
+      // ToDo: handle simCodeIndices correctly here
+      if listEmpty(jacobiansAdjoint) then
+        (simJacAdjoint, simCodeIndices) := SimJacobian.empty("ADJ", simCodeIndices);
+      else
+        simJacobianAdjoint := Jacobian.combine(jacobiansAdjoint, "ADJ");
+        (simJacAdj_opt, simCodeIndices) := SimJacobian.create(simJacobianAdjoint, simCodeIndices, simcode_map);
+        if Util.isSome(simJacAdj_opt) then
+          simJacAdjoint := Util.getOption(simJacAdj_opt);
+        else
+          (simJacAdjoint, simCodeIndices) := SimJacobian.empty("ADJ", simCodeIndices);
         end if;
       end if;
     end createSimulationJacobian;

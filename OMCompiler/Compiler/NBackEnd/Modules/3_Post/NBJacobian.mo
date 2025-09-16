@@ -476,6 +476,131 @@ public
       output SparsityPattern sparsityPattern = EMPTY_SPARSITY_PATTERN;
       output SparsityColoring sparsityColoring = EMPTY_SPARSITY_COLORING;
     end createEmpty;
+
+    function transpose
+      input SparsityPattern pattern;
+      input JacobianType jacType;
+      output SparsityPattern transposedPattern;
+      output SparsityColoring transposedColoring;
+    algorithm
+      transposedPattern := SPARSITY_PATTERN(
+        col_wise_pattern  = pattern.row_wise_pattern,
+        row_wise_pattern  = pattern.col_wise_pattern,
+        seed_vars         = pattern.partial_vars,
+        partial_vars      = pattern.seed_vars,
+        nnz               = pattern.nnz
+      );
+
+      print("seed_vars:\n");
+      print(List.toString(pattern.seed_vars, ComponentRef.toString) + "\n");
+      print("partial_vars:\n");
+      print(List.toString(pattern.partial_vars, ComponentRef.toString) + "\n");
+      transposedColoring := SparsityColoring.PartialD2ColoringAlgC(transposedPattern, jacType);
+    end transpose;
+
+
+    function transposeRenamed
+      "Transpose a sparsity pattern while applying renaming maps:
+         oldPartial -> newSeed
+         oldSeed    -> newPDer
+       Inputs:
+         pattern: original forward sparsity
+         mapPartialToNewSeed:  old partial_vars cref  -> new seed cref
+         mapSeedToNewPDer:     old seed_vars cref     -> new partial (pDer) cref
+       Output:
+         transposedPattern: with
+           seed_vars    = (renamed old partials)
+           partial_vars = (renamed old seeds)
+           col_wise_pattern: each new seed (old partial) -> list of new partials (old seeds)
+           row_wise_pattern: inverse."
+      input SparsityPattern pattern;
+      input UnorderedMap<ComponentRef, ComponentRef> mapPartialToNewSeed;
+      input UnorderedMap<ComponentRef, ComponentRef> mapSeedToNewPDer;
+      input JacobianType jacType;
+      output SparsityPattern transposedPattern;
+      output SparsityColoring transposedColoring;
+    protected
+      list<SparsityPatternCol> newCols = {};
+      list<SparsityPatternRow> newRows = {};
+      list<ComponentRef> newSeedVars = {};
+      list<ComponentRef> newPartialVars = {};
+      ComponentRef oldCref, newCref;
+      list<ComponentRef> oldDeps, newDeps;
+      Integer nnz = 0;
+      ComponentRef depOld, depNew;
+
+
+      UnorderedMap<ComponentRef, list<ComponentRef>> inv =
+        UnorderedMap.new<CrefLst>(ComponentRef.hash, ComponentRef.isEqual);
+      ComponentRef seedNew, partNew;
+      list<ComponentRef> partsLst;
+    algorithm
+      // Build new seed vars (renamed old partials)
+      for oldCref in pattern.partial_vars loop
+        if UnorderedMap.contains(oldCref, mapPartialToNewSeed) then
+          newCref := UnorderedMap.getOrFail(oldCref, mapPartialToNewSeed);
+          newSeedVars := newCref :: newSeedVars;
+        else
+          // skip if no rename (should not happen)
+        end if;
+      end for;
+      newSeedVars := listReverse(newSeedVars);
+
+      // Build new partial vars (renamed old seeds)
+      for oldCref in pattern.seed_vars loop
+        if UnorderedMap.contains(oldCref, mapSeedToNewPDer) then
+          newCref := UnorderedMap.getOrFail(oldCref, mapSeedToNewPDer);
+          newPartialVars := newCref :: newPartialVars;
+        end if;
+      end for;
+      newPartialVars := listReverse(newPartialVars);
+
+      // Column-wise (use old row_wise_pattern: (oldPartial -> list oldSeeds))
+      for tpl in pattern.row_wise_pattern loop
+        (oldCref, oldDeps) := tpl;
+        if UnorderedMap.contains(oldCref, mapPartialToNewSeed) then
+          newCref := UnorderedMap.getOrFail(oldCref, mapPartialToNewSeed);
+          newDeps := {};
+          for depOld in oldDeps loop
+            if UnorderedMap.contains(depOld, mapSeedToNewPDer) then
+              depNew := UnorderedMap.getOrFail(depOld, mapSeedToNewPDer);
+              newDeps := depNew :: newDeps;
+            end if;
+          end for;
+          newDeps := listReverse(newDeps);
+          newCols := (newCref, newDeps) :: newCols;
+          nnz := nnz + listLength(newDeps);
+        end if;
+      end for;
+      newCols := listReverse(newCols);
+
+      // Row-wise (inverse of newCols)
+      // Build inverse map: for each (seed -> partials) add seed to each partial's dependency list
+      // Use temporary map
+      for col in newCols loop
+        (seedNew, partsLst) := col;
+        for partNew in partsLst loop
+          UnorderedMap.add(partNew, seedNew :: UnorderedMap.getSafe(partNew, inv, sourceInfo()), inv);
+        end for;
+      end for;
+
+      for partNew in newPartialVars loop
+        newDeps := UnorderedSet.unique_list(UnorderedMap.getSafe(partNew, inv, sourceInfo()), ComponentRef.hash, ComponentRef.isEqual);
+        newRows := (partNew, newDeps) :: newRows;
+      end for;
+      newRows := listReverse(newRows);
+
+      transposedPattern := SPARSITY_PATTERN(
+        col_wise_pattern = newCols,
+        row_wise_pattern = newRows,
+        seed_vars        = newSeedVars,
+        partial_vars     = newPartialVars,
+        nnz              = nnz
+      );
+
+      // Re-color (or fallback to lazy if failing)
+      transposedColoring := SparsityColoring.PartialD2ColoringAlgC(transposedPattern, jacType);
+    end transposeRenamed;
   end SparsityPattern;
 
   constant SparsityPattern EMPTY_SPARSITY_PATTERN = SPARSITY_PATTERN({}, {}, {}, {}, 0);
@@ -683,7 +808,9 @@ protected
     VariablePointers unknowns;
     list<Pointer<Variable>> derivative_vars, state_vars, param_vars;
     VariablePointers seedCandidates, partialCandidates;
-    Option<Jacobian> jacobian                             "Resulting jacobian";
+    Option<Jacobian> jacobian, jacobianAdjoint  "Resulting jacobians";
+    Jacobian jacobianUnwrap, jacobianWrap;
+    array<StrongComponent> inlined_comps;
     Partition.Kind kind = Partition.Partition.getKind(part);
   algorithm
     partialCandidates := part.unknowns;
@@ -700,9 +827,37 @@ protected
       seedCandidates := VariablePointers.fromList(state_vars, partialCandidates.scalarized);
     end if;
 
+
+    // build primary jacobian (directinoal)
     (jacobian, funcTree) := func(name, jacType, seedCandidates, partialCandidates, part.equations, knowns, part.strongComponents, funcTree, kind ==  NBPartition.Kind.INI);
 
-    part.association := Partition.Association.CONTINUOUS(kind, jacobian);
+    // conditionally build adjoint jacobian
+    if Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN) == "adjoint" and Util.isSome(jacobian) then
+      jacobianUnwrap := Util.getOption(jacobian);
+      inlined_comps := StrongComponent.inlinePDerTemporaries(BackendDAE.getComponents(jacobianUnwrap));
+      jacobianWrap := Jacobian.JACOBIAN(
+        name              = name,
+        jacType           = jacType,
+        varData           = BackendDAE.getVarData(jacobianUnwrap),
+        comps             = inlined_comps,
+        sparsityPattern   = getSparsityPattern(jacobianUnwrap),
+        sparsityColoring  = getSparsityColoring(jacobianUnwrap)
+      );
+
+      // Use existing symbolic transpose helper (works for both normal + parameter Jacobian)
+      jacobianAdjoint := jacobianSymbolicAdjointFromSymbolic(
+        jacobianWrap,
+        part.strongComponents,
+        BackendDAE.getVarData(jacobianUnwrap),
+        seedCandidates,
+        partialCandidates,
+        jacType,
+        name
+      );
+    end if;
+
+    part.association := Partition.Association.CONTINUOUS(kind, jacobian, jacobianAdjoint);
+
     if Flags.isSet(Flags.JAC_DUMP) then
       print(Partition.Partition.toString(part, 2));
     end if;
@@ -798,22 +953,22 @@ protected
       sparsityColoring  = sparsityColoring
     ));
 
-    // use jacobian to generate adjoint jacobian if requested
-    if Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN) == "adjoint" then
-      // inline componentes to avoid issues with pDer temporaries (only when temps exist)
-      inlined_comps := StrongComponent.inlinePDerTemporaries(listArray(diffed_comps));
+    // // use jacobian to generate adjoint jacobian if requested
+    // if Flags.getConfigString(Flags.GENERATE_DYNAMIC_JACOBIAN) == "adjoint" then
+    //   // inline componentes to avoid issues with pDer temporaries (only when temps exist)
+    //   inlined_comps := StrongComponent.inlinePDerTemporaries(listArray(diffed_comps));
 
-      jacobian := SOME(Jacobian.JACOBIAN(
-      name              = name,
-      jacType           = jacType,
-      varData           = varDataJac,
-      comps             = inlined_comps,
-      sparsityPattern   = sparsityPattern,
-      sparsityColoring  = sparsityColoring
-      ));
+    //   jacobian := SOME(Jacobian.JACOBIAN(
+    //   name              = name,
+    //   jacType           = jacType,
+    //   varData           = varDataJac,
+    //   comps             = inlined_comps,
+    //   sparsityPattern   = sparsityPattern,
+    //   sparsityColoring  = sparsityColoring
+    //   ));
 
-      jacobian := jacobianSymbolicAdjointFromSymbolic(Util.getOption(jacobian), strongComponents, varDataJac, seedCandidates, partialCandidates, jacType, name);
-    end if;
+    //   jacobian := jacobianSymbolicAdjointFromSymbolic(Util.getOption(jacobian), strongComponents, varDataJac, seedCandidates, partialCandidates, jacType, name);
+    // end if;
   end jacobianSymbolic;
 
   function jacobianSymbolicParameters
@@ -1025,7 +1180,6 @@ protected
       (newSeed, _) := BVariable.makeSeedVar(base, "ODE_JAC_ADJ");
       newSeedCrefExprs := Expression.CREF(ty, newSeed) :: newSeedCrefExprs;
     end for;
-    newSeedCrefExprs := listReverse(newSeedCrefExprs);
 
     // New pDers: wrap each seed cref name in pDerPrefix
     newPDerCrefExprs := {};
@@ -1035,7 +1189,6 @@ protected
       (newPDer, _) := BVariable.makePDerVar(base, "ODE_JAC_ADJ", false);
       newPDerCrefExprs := Expression.CREF(ty, newPDer) :: newPDerCrefExprs;
     end for;
-    newPDerCrefExprs := listReverse(newPDerCrefExprs);
   end transposeSeedAndPDerCrefs;
 
   protected function jacobianSymbolicAdjointFromSymbolic
@@ -1069,6 +1222,14 @@ protected
     SparsityPattern sparsityPattern;
     SparsityColoring sparsityColoring;
     list<VariablePointer> newSeedPtrList, newPDerPtrList;
+
+
+    UnorderedMap<ComponentRef, ComponentRef> mapPartialToNewSeed =
+      UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
+    UnorderedMap<ComponentRef, ComponentRef> mapSeedToNewPDer =
+      UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
+    ComponentRef oldC, newC;
+    Integer idxTmp;
   algorithm  
     // extract varData and seed variable pointers
     vd := BackendDAE.getVarData(jac);
@@ -1191,7 +1352,7 @@ protected
 
     newPDerPtrList := {};
     for e in pDerCrefExprs loop
-      newPDerPtrList := Pointer.create(Variable.fromCref(Util.getOption(Expression.getCref(e)))) :: newPDerPtrList;
+      newPDerPtrList := BVariable.getVarPointer(Util.getOption(Expression.getCref(e)), sourceInfo()) :: newPDerPtrList;
     end for;
     newPDerPtrList := listReverse(newPDerPtrList);
 
@@ -1199,7 +1360,7 @@ protected
     for i in 1:listLength(newEquations) loop
       pder := listGet(pDerCrefExprs, i);
       diffed_comp := StrongComponent.SINGLE_COMPONENT(
-        Pointer.create(Variable.fromCref(Util.getOption(Expression.getCref(pder)))),
+        BVariable.getVarPointer(Util.getOption(Expression.getCref(pder)), sourceInfo()),
         listGet(newEquations, i),
         NBSolve.Status.EXPLICIT
       );
@@ -1216,14 +1377,42 @@ protected
     
     // (sparsityPattern, sparsityColoring) := SparsityPattern.create(seedCandidates, partialCandidates, SOME(listArray(listReverse(newEquationsSC))), jacType);
     // assume full dependency for now (lazy)
-    (sparsityPattern, sparsityColoring) := SparsityPattern.lazy(partialCandidates, seedCandidates, SOME(diffed_comps_array), jacType);
+
+
+    // original partials = pDerPtrList; new seeds = seedCrefExprs (same order as pDerCrefExprs? we built new seeds from pDer list)
+    idxTmp := 1;
+    for p in pDerPtrList loop
+      oldC := BVariable.getVarName(p);
+      // seedCrefExprs list corresponds to new seed expressions (constructed earlier)
+      newC := Expression.toCref(listGet(seedCrefExprs, idxTmp));
+      UnorderedMap.add(oldC, newC, mapPartialToNewSeed);
+      idxTmp := idxTmp + 1;
+    end for;
+
+    idxTmp := 1;
+    for sPtr in seedPtrList loop
+      oldC := BVariable.getVarName(sPtr);
+      newC := Expression.toCref(listGet(pDerCrefExprs, idxTmp)); // new pDer crefs
+      UnorderedMap.add(oldC, newC, mapSeedToNewPDer);
+      idxTmp := idxTmp + 1;
+    end for;
+
+    (sparsityPattern, sparsityColoring) :=
+      SparsityPattern.transposeRenamed(
+        getSparsityPattern(jac),
+        mapPartialToNewSeed,
+        mapSeedToNewPDer,
+        BackendDAE.getJacType(jac)
+      );
+    // (sparsityPattern, sparsityColoring) := SparsityPattern.transpose(getSparsityPattern(jac), BackendDAE.getJacType(jac));
 
     vd := BVariable.VarData.setDiffVars(vd, partialCandidates);
     vd := BVariable.VarData.setUnknowns(vd, VariablePointers.fromList(newPDerPtrList));
     vd := BVariable.VarData.setResultVars(vd, VariablePointers.fromList(newPDerPtrList));
     newSeedPtrList := {};
     for e in seedCrefExprs loop
-      newSeedPtrList := Pointer.create(Variable.fromCref(Util.getOption(Expression.getCref(e)))) :: newSeedPtrList;
+      // getVarPointer
+      newSeedPtrList := BVariable.getVarPointer(Util.getOption(Expression.getCref(e)), sourceInfo()) :: newSeedPtrList;
     end for;
     newSeedPtrList := listReverse(newSeedPtrList);
     vd := BVariable.VarData.setSeedVars(vd, VariablePointers.fromList(newSeedPtrList));
