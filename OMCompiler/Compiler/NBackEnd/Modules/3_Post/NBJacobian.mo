@@ -1076,37 +1076,37 @@ protected
     seedPtrList := VariablePointers.toList(VarData.getSeeds(vd));
     pDerPtrList := VariablePointers.toList(VarData.getUnknowns(vd));
 
-    print("seedCandidates:\n");
-    for v in VariablePointers.toList(seedCandidates) loop
-      print("  " + ComponentRef.toString(BVariable.getVarName(v)) + "\n");
-    end for;
+    // print("seedCandidates:\n");
+    // for v in VariablePointers.toList(seedCandidates) loop
+    //   print("  " + ComponentRef.toString(BVariable.getVarName(v)) + "\n");
+    // end for;
 
-    // Print partialCandidates
-    print("partialCandidates:\n");
-    for v in VariablePointers.toList(partialCandidates) loop
-      print("  " + ComponentRef.toString(BVariable.getVarName(v)) + "\n");
-    end for;
+    // // Print partialCandidates
+    // print("partialCandidates:\n");
+    // for v in VariablePointers.toList(partialCandidates) loop
+    //   print("  " + ComponentRef.toString(BVariable.getVarName(v)) + "\n");
+    // end for;
     // build seed cref expressions for easy matching: Expression.CREF(cref)
     seedCrefExprs := list(Expression.CREF(Type.REAL(), BVariable.getVarName(s_i)) for s_i in seedPtrList); // length is number of seeds
-    if Flags.isSet(Flags.JAC_DUMP) then
-      print("Jacobian original seeds:\n");
-      print(
-        StringUtil.stringDelimitList(
-          List.map(seedCrefExprs, Expression.toString),
-          ", "
-        ) + "\n"
-      );
-    end if;
+    // if Flags.isSet(Flags.JAC_DUMP) then
+    //   print("Jacobian original seeds:\n");
+    //   print(
+    //     StringUtil.stringDelimitList(
+    //       List.map(seedCrefExprs, Expression.toString),
+    //       ", "
+    //     ) + "\n"
+    //   );
+    // end if;
     pDerCrefExprs := list(Expression.CREF(Type.REAL(), BVariable.getVarName(p_i)) for p_i in pDerPtrList); // length is number of equations
-    if Flags.isSet(Flags.JAC_DUMP) then
-      print("Jacobian original pders:\n");
-      print(
-        StringUtil.stringDelimitList(
-          List.map(pDerCrefExprs, Expression.toString),
-          ", "
-        ) + "\n"
-      );
-    end if;
+    // if Flags.isSet(Flags.JAC_DUMP) then
+    //   print("Jacobian original pders:\n");
+    //   print(
+    //     StringUtil.stringDelimitList(
+    //       List.map(pDerCrefExprs, Expression.toString),
+    //       ", "
+    //     ) + "\n"
+    //   );
+    // end if;
 
     // iterate strong components; get array and its length
     comps := BackendDAE.getComponents(jac);
@@ -1144,49 +1144,49 @@ protected
     coeffsT := List.transposeList(coeffs);
 
 
-    if Flags.isSet(Flags.JAC_DUMP) then
-      print("Jacobian adjoint coefficient matrix (transposed):\n");
-      for row in coeffsT loop
-        for e in row loop
-          print(Expression.toString(e) + " ");
-        end for;
-        print("\n");
-      end for;
-    end if;
+    // if Flags.isSet(Flags.JAC_DUMP) then
+    //   print("Jacobian adjoint coefficient matrix (transposed):\n");
+    //   for row in coeffsT loop
+    //     for e in row loop
+    //       print(Expression.toString(e) + " ");
+    //     end for;
+    //     print("\n");
+    //   end for;
+    // end if;
 
     // now we need new seedPtrList and pDerPtrList for the adjoint jacobian
     // with number of seeds = number of columns in coeffsT
     // and number of equations = number of rows in coeffsT
     (seedCrefExprs, pDerCrefExprs) := transposeSeedAndPDerCrefs(VariablePointers.toList(seedCandidates), VariablePointers.toList(partialCandidates));
 
-    if Flags.isSet(Flags.JAC_DUMP) then
-      print("Jacobian transposed seeds:\n");
-      print(
-        StringUtil.stringDelimitList(
-          List.map(seedCrefExprs, Expression.toString),
-          ", "
-        ) + "\n"
-      );
-    end if;
-    if Flags.isSet(Flags.JAC_DUMP) then
-      print("Jacobian transposed pders:\n");
-      print(
-        StringUtil.stringDelimitList(
-          List.map(pDerCrefExprs, Expression.toString),
-          ", "
-        ) + "\n"
-      );
-    end if;
+    // if Flags.isSet(Flags.JAC_DUMP) then
+    //   print("Jacobian transposed seeds:\n");
+    //   print(
+    //     StringUtil.stringDelimitList(
+    //       List.map(seedCrefExprs, Expression.toString),
+    //       ", "
+    //     ) + "\n"
+    //   );
+    // end if;
+    // if Flags.isSet(Flags.JAC_DUMP) then
+    //   print("Jacobian transposed pders:\n");
+    //   print(
+    //     StringUtil.stringDelimitList(
+    //       List.map(pDerCrefExprs, Expression.toString),
+    //       ", "
+    //     ) + "\n"
+    //   );
+    // end if;
 
     // the rows of coeffsT are the new equations, each element per row gets its own seed
     // the columns of coeffsT get the same seed
     newEquations := buildJacobianEquationsFromTransposed(pDerCrefExprs, seedCrefExprs, coeffsT);
 
-    // print new equations
-    print("Jacobian adjoint equations:\n");
-    for eqPtr in newEquations loop
-      print(NBEquation.Equation.toString(Pointer.access(eqPtr)) + "\n");
-    end for;
+    // // print new equations
+    // print("Jacobian adjoint equations:\n");
+    // for eqPtr in newEquations loop
+    //   print(NBEquation.Equation.toString(Pointer.access(eqPtr)) + "\n");
+    // end for;
 
 
     newPDerPtrList := {};
@@ -1208,11 +1208,11 @@ protected
     diffed_comps_array := listArray(diffed_comps);
 
 
-    print("Jacobian diffed comps:\n");
-    for comp in diffed_comps_array loop
-      print(StrongComponent.toString(comp) + "\n");
-    end for;
-    print("##################\n");
+    // print("Jacobian diffed comps:\n");
+    // for comp in diffed_comps_array loop
+    //   print(StrongComponent.toString(comp) + "\n");
+    // end for;
+    // print("##################\n");
     
     // (sparsityPattern, sparsityColoring) := SparsityPattern.create(seedCandidates, partialCandidates, SOME(listArray(listReverse(newEquationsSC))), jacType);
     // assume full dependency for now (lazy)
@@ -1240,7 +1240,7 @@ protected
     if Flags.isSet(Flags.JAC_DUMP) then
       print("Jacobian adjoint:\n" + NBJacobian.toString(Util.getOption(jacobian), " ") + "\n");
 
-      print("Jacobian adjoint VarData:\n" + BVariable.VarData.toStringVerbose(vd, true) + "\n");
+      //print("Jacobian adjoint VarData:\n" + BVariable.VarData.toStringVerbose(vd, true) + "\n");
     end if;
   end jacobianSymbolicAdjointFromSymbolic;
 
