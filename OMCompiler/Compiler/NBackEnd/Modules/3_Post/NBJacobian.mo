@@ -480,7 +480,7 @@ public
     function transposeRenamed
       "Transpose a sparsity pattern while applying renaming maps:
          oldPartial -> newSeed
-         oldSeed    -> newPDer
+         oldSeed    -> newPartial
        Inputs:
          pattern: original forward sparsity
          mapPartialToNewSeed:  old partial_vars cref  -> new seed cref
@@ -576,7 +576,7 @@ public
         nnz              = nnz
       );
 
-      // Re-color (or fallback to lazy if failing)
+      // Re-color
       transposedColoring := SparsityColoring.PartialD2ColoringAlgC(transposedPattern, jacType);
     end transposeRenamed;
   end SparsityPattern;
@@ -1073,6 +1073,20 @@ protected
   end jacobianSymbolicParameters;
 
 
+  protected function allZeros
+    input list<Expression> xs;
+    output Boolean b;
+  algorithm
+    b := true;
+    for e in xs loop
+      if not Expression.isZero(e) then
+        b := false;
+        break;
+      end if;
+    end for;
+  end allZeros;
+
+
   protected function buildJacobianEquationsFromTransposed
     "Constructs new jacobian equations from a transposed coefficient matrix.
     Each row of the transposed matrix becomes an equation:
@@ -1121,7 +1135,7 @@ protected
       if listEmpty(terms) then
         rhs := Expression.REAL(0.0);
       else
-        rhs := List.fold(terms, makeAddExp, Expression.REAL(0.0));
+        rhs := Expression.MULTARY(terms, {}, Operator.makeAdd(Type.REAL()));
       end if;
 
       // Build the equation: lhs = rhs
@@ -1142,9 +1156,12 @@ protected
     input list<VariablePointer> pDerCrefExprs;
     output list<Expression> newSeedCrefExprs;
     output list<Expression> newPDerCrefExprs;
+    output list<VariablePointer> newSeedPtrList;
+    output list<VariablePointer> newPDerPtrList;
   protected
     String seedPrefix, pDerPrefix, baseName, fullName;
     ComponentRef base, newSeed, newPDer;
+    VariablePointer newSeedPtr, newPDerPtr;
 
     Expression e;
     Type ty;
@@ -1152,21 +1169,28 @@ protected
   algorithm
     // New seeds: wrap each pDer cref name in seedPrefix
     newSeedCrefExprs := {};
+    newSeedPtrList := {};
     for e in pDerCrefExprs loop
       ty := BVariable.getVarType(e);
       base := BVariable.getVarName(e);
-      (newSeed, _) := BVariable.makeSeedVar(base, "ODE_JAC_ADJ");
+      (newSeed, newSeedPtr) := BVariable.makeSeedVar(base, "ODE_JAC_ADJ");
       newSeedCrefExprs := Expression.CREF(ty, newSeed) :: newSeedCrefExprs;
+      newSeedPtrList := newSeedPtr :: newSeedPtrList;
     end for;
 
     // New pDers: wrap each seed cref name in pDerPrefix
     newPDerCrefExprs := {};
+    newPDerPtrList := {};
     for e in seedCrefExprs loop
       ty := BVariable.getVarType(e);
       base := BVariable.getVarName(e);
-      (newPDer, _) := BVariable.makePDerVar(base, "ODE_JAC_ADJ", false);
+      (newPDer, newPDerPtr) := BVariable.makePDerVar(base, "ODE_JAC_ADJ", false);
       newPDerCrefExprs := Expression.CREF(ty, newPDer) :: newPDerCrefExprs;
+      newPDerPtrList := newPDerPtr :: newPDerPtrList;
     end for;
+
+    newPDerCrefExprs := listReverse(newPDerCrefExprs);
+    newPDerPtrList := listReverse(newPDerPtrList);
   end transposeSeedAndPDerCrefs;
 
   protected function jacobianSymbolicAdjointFromSymbolic
@@ -1190,7 +1214,7 @@ protected
     Integer eqi, s;
     ComponentRef seedVarName;
     Pointer<Equation> eqPtr;
-    Expression eqExp, pder;
+    Expression eqExp, pder, eqCopy, term;
     UnorderedMap<ComponentRef, Expression> replaceMap;
     list<list<Expression>> coeffsT = {}, coeffs = {};
     list<Expression> seedCrefExprs = {}, pDerCrefExprs = {};
@@ -1200,6 +1224,7 @@ protected
     SparsityPattern sparsityPattern;
     SparsityColoring sparsityColoring;
     list<VariablePointer> newSeedPtrList, newPDerPtrList;
+    VariablePointer pderPtr;
 
 
     UnorderedMap<ComponentRef, ComponentRef> mapPartialToNewSeed =
@@ -1251,32 +1276,41 @@ protected
     comps := BackendDAE.getComponents(jac);
 
     // For each strong component, extract its coefficients.
+    replaceMap := UnorderedMap.new<Expression>(ComponentRef.hash, ComponentRef.isEqual, Util.nextPrime(listLength(seedPtrList) + listLength(pDerPtrList)));
+    // Seed variables default to 0.0
+    for sPtr in seedPtrList loop
+      UnorderedMap.add(BVariable.getVarName(sPtr), Expression.REAL(0.0), replaceMap);
+    end for;
+    // pDer variables always 0.0 here
+    for pDerPtr in pDerPtrList loop
+      UnorderedMap.add(BVariable.getVarName(pDerPtr), Expression.REAL(0.0), replaceMap);
+    end for;
+
     for eqi in 1:arrayLength(comps) loop
-      // For each seed build a replacement map: seed_s -> 1, others -> 0
+      eqPtr := StrongComponent.getEquationPointer(comps[eqi]);
+      eqExp := Equation.getResidualExp(Pointer.access(eqPtr));
       singleEqResults := {};
+      // set each seed to 1 once
       for s in 1:listLength(seedPtrList) loop
-        replaceMap := UnorderedMap.new<NBackendDAE.Expression>(NBackendDAE.ComponentRef.hash, NBackendDAE.ComponentRef.isEqual);
-        for si in 1:listLength(seedPtrList) loop
-          seedVarName := BVariable.getVarName(listGet(seedPtrList, si));
-          if si == s then
-            UnorderedMap.add(seedVarName, Expression.REAL(1.0), replaceMap);
-          else
-            UnorderedMap.add(seedVarName, Expression.REAL(0.0), replaceMap);
-          end if;
-        end for;
+        seedVarName := BVariable.getVarName(listGet(seedPtrList, s));
+        // set current seed to 1.0
+        _ := UnorderedMap.tryUpdate(seedVarName, Expression.REAL(1.0), replaceMap);
 
-        for pDerPtr in pDerPtrList loop
-          UnorderedMap.add(BVariable.getVarName(pDerPtr), Expression.REAL(0.0), replaceMap);
-        end for;
+        eqCopy := eqExp;
+        eqCopy := replaceCrefsInExp(eqCopy, replaceMap);
+        eqCopy := SimplifyExp.simplify(eqCopy);
 
-        eqPtr := StrongComponent.getEquationPointer(comps[eqi]);
-        eqExp := Equation.getResidualExp(Pointer.access(eqPtr));
-        eqExp := replaceCrefsInExp(eqExp, replaceMap);
-        eqExp := SimplifyExp.simplify(eqExp);
+        // term := Expression.BINARY(
+        //     eqCopy,
+        //     Operator.makeMul(Type.REAL()),
+        //     BVariable.toExpression(listGet(seedPtrList, eqi)) // because of the transpose, use eqi here
+        // );
 
-        singleEqResults := eqExp :: singleEqResults;
+        singleEqResults := eqCopy :: singleEqResults;
+
+        // reset seed to 0.0
+        _ := UnorderedMap.tryUpdate(seedVarName, Expression.REAL(0.0), replaceMap);
       end for;
-
       coeffs := singleEqResults :: coeffs;
     end for;
     // transpose the coefficient matrix
@@ -1296,7 +1330,7 @@ protected
     // now we need new seedPtrList and pDerPtrList for the adjoint jacobian
     // with number of seeds = number of columns in coeffsT
     // and number of equations = number of rows in coeffsT
-    (seedCrefExprs, pDerCrefExprs) := transposeSeedAndPDerCrefs(VariablePointers.toList(seedCandidates), VariablePointers.toList(partialCandidates));
+    (seedCrefExprs, pDerCrefExprs, newSeedPtrList, newPDerPtrList) := transposeSeedAndPDerCrefs(VariablePointers.toList(seedCandidates), VariablePointers.toList(partialCandidates));
 
     // if Flags.isSet(Flags.JAC_DUMP) then
     //   print("Jacobian transposed seeds:\n");
@@ -1327,18 +1361,11 @@ protected
     //   print(NBEquation.Equation.toString(Pointer.access(eqPtr)) + "\n");
     // end for;
 
-
-    newPDerPtrList := {};
-    for e in pDerCrefExprs loop
-      newPDerPtrList := BVariable.getVarPointer(Util.getOption(Expression.getCref(e)), sourceInfo()) :: newPDerPtrList;
-    end for;
-    newPDerPtrList := listReverse(newPDerPtrList);
-
     // ToDo: handle other component types and take solve status from original component
     for i in 1:listLength(newEquations) loop
-      pder := listGet(pDerCrefExprs, i);
+      pderPtr := listGet(newPDerPtrList, i);
       diffed_comp := StrongComponent.SINGLE_COMPONENT(
-        BVariable.getVarPointer(Util.getOption(Expression.getCref(pder)), sourceInfo()),
+        pderPtr,
         listGet(newEquations, i),
         NBSolve.Status.EXPLICIT
       );
@@ -1357,23 +1384,31 @@ protected
     // assume full dependency for now (lazy)
 
 
-    // original partials = pDerPtrList; new seeds = seedCrefExprs (same order as pDerCrefExprs? we built new seeds from pDer list)
+    // original partials = pDerPtrList to new seeds = newSeedPtrList
     idxTmp := 1;
     for p in pDerPtrList loop
       oldC := BVariable.getVarName(p);
       // seedCrefExprs list corresponds to new seed expressions (constructed earlier)
-      newC := Expression.toCref(listGet(seedCrefExprs, idxTmp));
+      newC := BVariable.getVarName(listGet(newSeedPtrList, idxTmp)); // new seed crefs
       UnorderedMap.add(oldC, newC, mapPartialToNewSeed);
       idxTmp := idxTmp + 1;
     end for;
 
+    print("Map original partials to new seeds:\n");
+    print(UnorderedMap.toString(mapPartialToNewSeed, ComponentRef.toString, ComponentRef.toString) + "\n");
+
+
+    // original seeds = seedPtrList to new pDers = newPDerPtrList
     idxTmp := 1;
-    for sPtr in seedPtrList loop
+    for sPtr in listReverse(seedPtrList) loop
       oldC := BVariable.getVarName(sPtr);
-      newC := Expression.toCref(listGet(pDerCrefExprs, idxTmp)); // new pDer crefs
+      newC := BVariable.getVarName(listGet(newPDerPtrList, idxTmp));
       UnorderedMap.add(oldC, newC, mapSeedToNewPDer);
       idxTmp := idxTmp + 1;
     end for;
+
+    print("Map original seeds to new pDers:\n");
+    print(UnorderedMap.toString(mapSeedToNewPDer, ComponentRef.toString, ComponentRef.toString) + "\n");
 
     (sparsityPattern, sparsityColoring) :=
       SparsityPattern.transposeRenamed(
@@ -1387,12 +1422,6 @@ protected
     vd := BVariable.VarData.setDiffVars(vd, partialCandidates);
     vd := BVariable.VarData.setUnknowns(vd, VariablePointers.fromList(newPDerPtrList));
     vd := BVariable.VarData.setResultVars(vd, VariablePointers.fromList(newPDerPtrList));
-    newSeedPtrList := {};
-    for e in seedCrefExprs loop
-      // getVarPointer
-      newSeedPtrList := BVariable.getVarPointer(Util.getOption(Expression.getCref(e)), sourceInfo()) :: newSeedPtrList;
-    end for;
-    newSeedPtrList := listReverse(newSeedPtrList);
     vd := BVariable.VarData.setSeedVars(vd, VariablePointers.fromList(newSeedPtrList));
 
     jacobian := SOME(Jacobian.JACOBIAN(
@@ -1406,7 +1435,6 @@ protected
 
     if Flags.isSet(Flags.JAC_DUMP) then
       print("Jacobian adjoint:\n" + NBJacobian.toString(Util.getOption(jacobian), " ") + "\n");
-
       //print("Jacobian adjoint VarData:\n" + BVariable.VarData.toStringVerbose(vd, true) + "\n");
     end if;
   end jacobianSymbolicAdjointFromSymbolic;
