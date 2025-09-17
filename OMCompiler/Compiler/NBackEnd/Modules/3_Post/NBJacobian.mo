@@ -1193,6 +1193,28 @@ protected
     newPDerPtrList := listReverse(newPDerPtrList);
   end transposeSeedAndPDerCrefs;
 
+
+  protected function findSeedByBase
+    input ComponentRef baseCref;
+    input list<VariablePointer> seedPtrs;
+    output Option<ComponentRef> seedOpt;
+  protected
+    ComponentRef sCref;
+    String baseStr = ComponentRef.toString(baseCref);
+    String seedStr;
+  algorithm
+    seedOpt := NONE();
+    for sPtr in seedPtrs loop
+      sCref := BVariable.getVarName(sPtr);         // $SEED_….<base>
+      seedStr := ComponentRef.toString(sCref);
+      // Match if seed ends with ".<base>" or equals <base> (defensive)
+      if StringUtil.endsWith(seedStr, "." + baseStr) or seedStr == baseStr then
+        seedOpt := SOME(sCref);
+        break;
+      end if;
+    end for;
+  end findSeedByBase;
+
   protected function jacobianSymbolicAdjointFromSymbolic
     "For a JACOBIAN backendDAE: iterate all strong components and for each
     compute the expression results for each seed by setting the seed of
@@ -1221,7 +1243,7 @@ protected
     list<Expression> singleEqResults = {};
     list<EquationPointer> newEquations = {};
     StrongComponent diffed_comp;
-    SparsityPattern sparsityPattern;
+    SparsityPattern sparsityPattern, oldSparsityPattern;
     SparsityColoring sparsityColoring;
     list<VariablePointer> newSeedPtrList, newPDerPtrList;
     VariablePointer pderPtr;
@@ -1231,8 +1253,16 @@ protected
       UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
     UnorderedMap<ComponentRef, ComponentRef> mapSeedToNewPDer =
       UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
-    ComponentRef oldC, newC;
-    Integer idxTmp;
+    UnorderedMap<ComponentRef, Integer> seedIndexMap;
+    UnorderedMap<ComponentRef, list<ComponentRef>> rowDepMap;
+    ComponentRef oldC, newC, rowCref, oldCref, seedCref, baseSeed;
+    CrefLst oldDeps, activeSeeds;
+    array<Expression> rowArr;
+
+    Integer idxTmp, colIdx, i;
+    Boolean updated;
+    array<StrongComponent> origComps;
+    Option<ComponentRef> seedOpt;
   algorithm  
     // extract varData and seed variable pointers
     vd := BackendDAE.getVarData(jac);
@@ -1274,45 +1304,125 @@ protected
 
     // iterate strong components; get array and its length
     comps := BackendDAE.getComponents(jac);
+    origComps := listArray(list(c for c guard(not StrongComponent.isDiscrete(c)) in Util.getOption(strongComponents)));
+    oldSparsityPattern := getSparsityPattern(jac);
 
     // For each strong component, extract its coefficients.
     replaceMap := UnorderedMap.new<Expression>(ComponentRef.hash, ComponentRef.isEqual, Util.nextPrime(listLength(seedPtrList) + listLength(pDerPtrList)));
+
+    // for sCref in oldSparsityPattern.seed_vars loop
+    //   UnorderedMap.add(sCref, Expression.REAL(0.0), replaceMap);
+    // end for;
     // Seed variables default to 0.0
     for sPtr in seedPtrList loop
       UnorderedMap.add(BVariable.getVarName(sPtr), Expression.REAL(0.0), replaceMap);
     end for;
-    // pDer variables always 0.0 here
-    for pDerPtr in pDerPtrList loop
-      UnorderedMap.add(BVariable.getVarName(pDerPtr), Expression.REAL(0.0), replaceMap);
+    // // pDer variables always 0.0 here
+    // for pDerPtr in pDerPtrList loop
+    //   UnorderedMap.add(BVariable.getVarName(pDerPtr), Expression.REAL(0.0), replaceMap);
+    // end for;
+
+
+    // Build lookup: seed cref -> column index
+    // Needed to place each computed coefficient in the correct column.
+    // Use 1-based indices to match listGet semantics.
+    seedIndexMap := UnorderedMap.new<Integer>(ComponentRef.hash, ComponentRef.isEqual, Util.nextPrime(listLength(seedPtrList)));
+    // for j in 1:listLength(seedPtrList) loop
+    //   UnorderedMap.add(BVariable.getVarName(listGet(seedPtrList, j)), j, seedIndexMap);
+    // end for;
+    i := 1;
+    for sCref in oldSparsityPattern.seed_vars loop
+      UnorderedMap.add(sCref, i, seedIndexMap);
+      i := i + 1;
+    end for;
+
+
+    // Build lookup: row (partial/pDer) cref -> list of seed crefs that affect it (row-wise sparsity)
+    // just the row wise pattern in a map for fast lookup
+    rowDepMap := UnorderedMap.new<CrefLst>(ComponentRef.hash, ComponentRef.isEqual, Util.nextPrime(listLength(pDerPtrList)));
+    for tpl in oldSparsityPattern.row_wise_pattern loop
+      (oldCref, oldDeps) := tpl;
+      UnorderedMap.add(oldCref, oldDeps, rowDepMap);
     end for;
 
     for eqi in 1:arrayLength(comps) loop
       eqPtr := StrongComponent.getEquationPointer(comps[eqi]);
-      eqExp := Equation.getResidualExp(Pointer.access(eqPtr));
-      singleEqResults := {};
-      // set each seed to 1 once
-      for s in 1:listLength(seedPtrList) loop
-        seedVarName := BVariable.getVarName(listGet(seedPtrList, s));
-        // set current seed to 1.0
-        _ := UnorderedMap.tryUpdate(seedVarName, Expression.REAL(1.0), replaceMap);
+      eqExp := Equation.getRHS(Pointer.access(eqPtr));
+      //eqExp := Equation.getResidualExp(Pointer.access(eqPtr));
 
+      // Identify the row variable (partial/pDer) for this equation
+      // rowCref := BVariable.getVarName(listGet(pDerPtrList, eqi));
+      rowCref := BVariable.getVarName(StrongComponent.getVarPointer(origComps[eqi]));
+
+
+      // Get only the active seeds for this row from sparsity; if unknown, assume none
+      activeSeeds := if UnorderedMap.contains(rowCref, rowDepMap) then UnorderedMap.getOrFail(rowCref, rowDepMap) else {};
+      print(intString(listLength(activeSeeds)) + " active seeds for equation " + intString(eqi) + "\n");
+      // initialize with dense zeros
+      //rowArr := arrayCreate(listLength(seedPtrList), Expression.REAL(0.0));
+      rowArr := arrayCreate(listLength(oldSparsityPattern.seed_vars), Expression.REAL(0.0));
+
+      // Toggle only the active seeds one-by-one: seed := 1.0, evaluate, reset to 0.0
+      for baseSeed in activeSeeds loop
+        colIdx := UnorderedMap.getSafe(baseSeed, seedIndexMap, sourceInfo());
+
+        // Find corresponding $SEED cref to toggle in RHS
+        // If none found, skip (e.g. seed pruned in forward Jacobian)
+        seedOpt := findSeedByBase(baseSeed, seedPtrList);
+        if Util.isNone(seedOpt) then
+          continue;
+        end if;
+        seedCref := Util.getOption(seedOpt);
+
+        // Set current seed to 1.0
+        _ := UnorderedMap.tryUpdate(seedCref, Expression.REAL(1.0), replaceMap);
+
+        // Substitute on a fresh copy and simplify
         eqCopy := eqExp;
         eqCopy := replaceCrefsInExp(eqCopy, replaceMap);
         eqCopy := SimplifyExp.simplify(eqCopy);
 
-        // term := Expression.BINARY(
-        //     eqCopy,
-        //     Operator.makeMul(Type.REAL()),
-        //     BVariable.toExpression(listGet(seedPtrList, eqi)) // because of the transpose, use eqi here
-        // );
+        // Place result in the correct column, leave others at 0.0
+        rowArr[colIdx] := eqCopy;
 
-        singleEqResults := eqCopy :: singleEqResults;
-
-        // reset seed to 0.0
-        _ := UnorderedMap.tryUpdate(seedVarName, Expression.REAL(0.0), replaceMap);
+        // Reset current seed to 0.0 for next iteration
+        _ := UnorderedMap.tryUpdate(seedCref, Expression.REAL(0.0), replaceMap);
       end for;
-      coeffs := singleEqResults :: coeffs;
+
+      // Append dense row to coefficient matrix
+      coeffs := arrayList(rowArr) :: coeffs;
     end for;
+
+    // singleEqResults := {};
+    // // set each seed to 1 once
+    // for s in 1:listLength(seedPtrList) loop
+    //   seedVarName := BVariable.getVarName(listGet(seedPtrList, s));
+    //   // set current seed to 1.0
+    //   updated := UnorderedMap.tryUpdate(seedVarName, Expression.REAL(1.0), replaceMap);
+    //   if not updated then
+    //     Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " failed to set seed value in map for adjoint jacobian."});
+    //   end if;
+
+    //   eqCopy := eqExp;
+    //   eqCopy := replaceCrefsInExp(eqCopy, replaceMap);
+    //   eqCopy := SimplifyExp.simplify(eqCopy);
+
+    //   // term := Expression.BINARY(
+    //   //     eqCopy,
+    //   //     Operator.makeMul(Type.REAL()),
+    //   //     BVariable.toExpression(listGet(seedPtrList, eqi)) // because of the transpose, use eqi here
+    //   // );
+
+    //   singleEqResults := eqCopy :: singleEqResults;
+
+    //   // reset seed to 0.0
+    //   updated := UnorderedMap.tryUpdate(seedVarName, Expression.REAL(0.0), replaceMap);
+    //   if not updated then
+    //     Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " failed to reset seed value in map for adjoint jacobian."});
+    //   end if;
+    // end for;
+    // coeffs := singleEqResults :: coeffs;
+    // end for;
     // transpose the coefficient matrix
     coeffsT := List.transposeList(coeffs);
 
