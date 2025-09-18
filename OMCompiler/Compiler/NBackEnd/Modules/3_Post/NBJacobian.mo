@@ -729,6 +729,8 @@ public
       list<ComponentRef> deps;
       array<list<Integer>> cols, rows, colored_cols;
       array<SparsityColoringCol> cref_colored_cols;
+      UnorderedMap<ComponentRef, Integer> probe;
+      Boolean needFallback;
     algorithm
       // create index -> cref arrays
       seeds := listArray(sparsityPattern.seed_vars);
@@ -737,6 +739,24 @@ public
       else
         partials := listArray(list(cref for cref guard(BVariable.checkCref(cref, BVariable.isStateDerivative, sourceInfo()) or
           BVariable.checkCref(cref, BVariable.isResidual, sourceInfo())) in sparsityPattern.partial_vars));
+      end if;
+
+      // Detect if filtering lost any row head used in the pattern
+      probe := UnorderedMap.new<Integer>(ComponentRef.hash, ComponentRef.isEqual, Util.nextPrime(arrayLength(partials)));
+      for i in 1:arrayLength(partials) loop
+        UnorderedMap.add(partials[i], i, probe);
+      end for;
+      needFallback := false;
+      for tpl in sparsityPattern.row_wise_pattern loop
+        (idx_cref, _) := tpl;
+        if not UnorderedMap.contains(idx_cref, probe) then
+          needFallback := true;
+          break;
+        end if;
+      end for;
+      if needFallback then
+        // Use all partials (adjoint rows like $pDER_… won’t pass the filter)
+        partials := listArray(sparsityPattern.partial_vars);
       end if;
 
       // create cref -> index maps
@@ -1337,7 +1357,6 @@ protected
     list<VariablePointer> newSeedPtrList, newPDerPtrList, tmp_;
     VariablePointer pderPtr;
 
-
     UnorderedMap<ComponentRef, ComponentRef> mapPartialToNewSeed =
       UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
     UnorderedMap<ComponentRef, ComponentRef> mapSeedToNewPDer =
@@ -1607,6 +1626,10 @@ protected
     print("Map original partials to new seeds:\n");
     print(UnorderedMap.toString(mapPartialToNewSeed, ComponentRef.toString, ComponentRef.toString) + "\n");
 
+    print("Type of old partials elements: ");
+    print(Type.toString(ComponentRef.getComponentType(listGet(oldSparsityPattern.partial_vars, 1))) + "\n");
+    print("Type of newSeedPtrList elements: ");
+    print(Type.toString(ComponentRef.getComponentType(BVariable.getVarName(listGet(tmp_, 1)))) + "\n");
 
     // // original seeds = seedPtrList to new pDers = newPDerPtrList
     // idxTmp := 1;
@@ -1629,6 +1652,11 @@ protected
 
     print("Map original seeds to new pDers:\n");
     print(UnorderedMap.toString(mapSeedToNewPDer, ComponentRef.toString, ComponentRef.toString) + "\n");
+
+    print("Type of old seeds elements: ");
+    print(Type.toString(ComponentRef.getComponentType(listGet(oldSparsityPattern.seed_vars, 1))) + "\n");
+    print("Type of newPDerPtrList elements: ");
+    print(Type.toString(ComponentRef.getComponentType(BVariable.getVarName(listGet(newPDerPtrList, 1)))) + "\n");
 
     (sparsityPattern, sparsityColoring) :=
       SparsityPattern.transposeRenamed(
