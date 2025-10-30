@@ -5529,8 +5529,7 @@ template functionAnalyticJacobians(list<JacobianMatrix> JacobianMatrices, String
             maxColorCols,             /* useMaxColors */
             modelNamePrefix,
             fileNamePrefix)
-      end match
-      ;separator = "\n")
+      ;separator="\n")
       
   let jacMats = (JacobianMatrices |> JAC_MATRIX() =>
     generateMatrix(columns, seedVars, matrixName, partitionIndex, crefsHT, modelNamePrefix) ;separator="\n")
