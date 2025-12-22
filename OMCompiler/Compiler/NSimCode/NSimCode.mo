@@ -246,6 +246,9 @@ public
       if not listEmpty(simCode.clockedPartitions) then
         str := str + SimPartition.listToString(simCode.clockedPartitions, "  ", "Clocked Partitions") + "\n";
       end if;
+      if not listEmpty(simCode.modelInfo.nonlinearLoops) then
+        str := str + SimStrongComponent.Block.listToString(simCode.modelInfo.nonlinearLoops, "  ", "Nonlinear Systems") + "\n";
+      end if;
       if not listEmpty(simCode.literals) then
         str := str + StringUtil.headline_3("Shared Literals");
         str := str + List.toString(simCode.literals, Expression.toString, "", "  ", "\n  ", "\n\n");
@@ -433,6 +436,11 @@ public
             // jacobian blocks only from simulation jacobians
             jac_blocks := SimJacobian.getJacobiansBlocks({jacA, jacB, jacC, jacD, jacF, jacH});
             (jac_blocks, simCodeIndices) := SimStrongComponent.Block.fixIndices(jac_blocks, {}, simCodeIndices);
+
+            // also add algebraic loops found in jacobians to nonlinearLoops
+            (linearLoops, nonlinearLoops, jacobians, simCodeIndices) :=
+              SimStrongComponent.Block.collectAlgebraicLoops(
+                {jac_blocks}, linearLoops, nonlinearLoops, jacobians, simCodeIndices, simcode_map);
 
             // generate the generic loop calls and replace literal expressions
             generic_loop_calls  := list(SimGenericCall.fromIdentifier(tpl) for tpl in UnorderedMap.toList(simCodeIndices.generic_call_map));

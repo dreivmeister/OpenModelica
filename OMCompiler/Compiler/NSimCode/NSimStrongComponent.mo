@@ -1041,6 +1041,9 @@ public
           (linearLoops, nonlinearLoops) := match blck
             local
               Option<SimJacobian> jacobian;
+              list<ComponentRef> crefs;
+              ComponentRef base_c;
+              Option<SimVar> base_var;
             case LINEAR() then (blck :: linearLoops, nonlinearLoops);
             case NONLINEAR() algorithm
               jacobian := NonlinearSystem.getJacobian(blck.system);
@@ -1048,6 +1051,22 @@ public
                 jacobians := Util.getOption(jacobian) :: jacobians;
               end if;
               blck.system := NonlinearSystem.setJacobian(blck.system, jacobian);
+
+
+              crefs := NonlinearSystem.getCrefs(blck.system);
+              for c in crefs loop
+                if not UnorderedMap.contains(c, simcode_map) then
+                  base_c := findKnownBaseCref(c, simcode_map);
+                  // If a known base cref exists, alias full cref to that SimVar
+                  if not ComponentRef.isEmpty(base_c) and UnorderedMap.contains(base_c, simcode_map) then
+                    base_var := UnorderedMap.get(base_c, simcode_map);
+                    if Util.isSome(base_var) then
+                      UnorderedMap.add(c, Util.getOption(base_var), simcode_map);
+                    end if;
+                  end if;
+                end if;
+              end for;
+
             then (linearLoops, blck :: nonlinearLoops);
             else (linearLoops, nonlinearLoops);
           end match;
@@ -1318,6 +1337,28 @@ public
         then fail();
       end match;
     end getGenericEquationName;
+
+    function findKnownBaseCref
+      "Given a potentially decorated cref (e.g. $pXXX.$DER.x), drop leading qualifiers
+       until a cref present in simcode_map is found. Returns the found base cref,
+       or the original cref if none found (caller must check presence)."
+      input ComponentRef cref;
+      input UnorderedMap<ComponentRef, SimVar> simcode_map;
+      output ComponentRef base_c;
+    algorithm
+      if UnorderedMap.contains(cref, simcode_map) then
+        base_c := cref;
+        return;
+      end if;
+
+      base_c := match cref
+        local
+          ComponentRef rest;
+        case ComponentRef.CREF(restCref = rest)
+          then findKnownBaseCref(rest, simcode_map);
+        else cref;
+      end match;
+    end findKnownBaseCref;
   end Block;
 
   uniontype LinearSystem
@@ -1387,6 +1428,11 @@ public
       input NonlinearSystem syst;
       output Option<SimJacobian> jacobian = Pointer.access(syst.jacobian);
     end getJacobian;
+
+    function getCrefs
+      input NonlinearSystem syst;
+      output list<ComponentRef> crefs = syst.crefs;
+    end getCrefs;
 
     function setJacobian
       input output NonlinearSystem syst;
