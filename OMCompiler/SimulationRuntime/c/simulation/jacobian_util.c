@@ -368,6 +368,133 @@ void vjp(DATA* data, threadData_t *threadData,
   }
 }
 
+int jacADJ_symColored(double *t, double *y, double *yprime, double *delta,
+                      double *matrixA, double *rpar)
+{
+  (void)t; (void)y; (void)yprime; (void)delta;
+
+  DATA* data = (DATA*)(void*)((double**)rpar)[0];
+  threadData_t *threadData = (threadData_t*)(void*)((double**)rpar)[2];
+
+  JACOBIAN* jac = &(data->simulationInfo->analyticJacobians[data->callback->INDEX_JAC_ADJ]);
+
+  const unsigned int columns = jac->sizeCols;
+  const unsigned int rows    = jac->sizeRows;
+  SPARSE_PATTERN* spp        = jac->sparsePattern;
+
+  if (jac->constantEqns != NULL) {
+    jac->constantEqns(data, threadData, jac, NULL);
+  }
+
+  unsigned int color, col, nz, row;
+  for (color = 0; color < (unsigned int)spp->maxColors; color++) {
+    printf("\n--- color %u ---\n", color);
+
+    for (col = 0; col < columns; col++) {
+      if ((unsigned int)(spp->colorCols[col] - 1) == color) {
+        jac->seedVars[col] = 1.0;
+      }
+    }
+
+    /* Print seedVars before column eval */
+    printf("  seedVars before eval: ");
+    for (col = 0; col < columns; col++) {
+      printf("[%u]=%.1f ", col, jac->seedVars[col]);
+    }
+    printf("\n");
+
+    jac->evalColumn(data, threadData, jac, NULL);
+
+    /* Print ALL resultVars after column eval */
+    printf("  resultVars after eval:\n");
+    for (unsigned int r = 0; r < rows; r++) {
+      printf("    resultVars[%u] (%-8s) = % .6e\n",
+             r,
+             data->modelData->realVarsData[r].info.name,
+             jac->resultVars[r]);
+    }
+    for (col = 0; col < columns; col++) {
+      if ((unsigned int)(spp->colorCols[col] - 1) == color) {
+        printf("  scattering col %u (leadindex %u..%u):\n",
+               col, spp->leadindex[col], spp->leadindex[col + 1]);
+        for (nz = spp->leadindex[col]; nz < spp->leadindex[col + 1]; nz++) {
+          row = spp->index[nz];
+          printf("    matrixA[col=%u, row=%u] = resultVars[%u] = % .6e\n",
+                 col, row, row, jac->resultVars[row]);
+          matrixA[col * rows + row] = jac->resultVars[row];
+        }
+        jac->seedVars[col] = 0.0;
+      }
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Evaluates the ADJ Jacobian and splits the result into two matrices:
+ *   matrixSelected: rows corresponding to indices in selectedRows[]
+ *   matrixOther:    rows corresponding to all other result var indices
+ *
+ * @param t              time value
+ * @param rpar           rpar_slots pointer (DATA*, NULL, threadData_t*)
+ * @param rows           total number of result var rows (jac->sizeRows)
+ * @param cols           total number of seed columns   (jac->sizeCols)
+ * @param selectedRows   array of result var indices to put in matrixSelected
+ * @param nSelected      length of selectedRows
+ * @param matrixSelected output matrix [nSelected x cols], col-major
+ * @param matrixOther    output matrix [(rows-nSelected) x cols], col-major
+ * @param nOther         output: number of rows in matrixOther
+ */
+void jacADJ_split(double t,
+                  double *rpar,
+                  unsigned int rows,
+                  unsigned int cols,
+                  const unsigned int *selectedRows,
+                  unsigned int nSelected,
+                  double *matrixSelected,
+                  double *matrixOther,
+                  unsigned int *nOther)
+{
+  /* Evaluate full Jacobian into a temporary dense matrix */
+  double *fullMatrix = (double*)calloc((size_t)rows * (size_t)cols, sizeof(double));
+  jacADJ_symColored(&t, NULL, NULL, NULL, fullMatrix, rpar);
+
+  /* Build a boolean mask: isSelected[r] = 1 if row r is in selectedRows */
+  int *isSelected = (int*)calloc(rows, sizeof(int));
+  for (unsigned int i = 0; i < nSelected; i++) {
+    if (selectedRows[i] < rows) {
+      isSelected[selectedRows[i]] = 1;
+    }
+  }
+
+  /* Count other rows */
+  unsigned int nOtherCount = 0;
+  for (unsigned int r = 0; r < rows; r++) {
+    if (!isSelected[r]) nOtherCount++;
+  }
+  *nOther = nOtherCount;
+
+  /* Split into two matrices (both col-major) */
+  for (unsigned int c = 0; c < cols; c++) {
+    unsigned int selRow   = 0;
+    unsigned int otherRow = 0;
+    for (unsigned int r = 0; r < rows; r++) {
+      double val = fullMatrix[c * rows + r];
+      if (isSelected[r]) {
+        matrixSelected[c * nSelected + selRow] = val;
+        selRow++;
+      } else {
+        matrixOther[c * nOtherCount + otherRow] = val;
+        otherRow++;
+      }
+    }
+  }
+
+  free(isSelected);
+  free(fullMatrix);
+}
+
 /**
  * @brief Allocate memory for sparsity pattern.
  *

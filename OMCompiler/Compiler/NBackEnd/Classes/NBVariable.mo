@@ -704,6 +704,15 @@ public
     end match;
   end isParamOrConst;
 
+  function isParam
+    extends checkVar;
+  algorithm
+    b := match var.backendinfo.varKind
+      case VariableKind.PARAMETER() then true;
+      else false;
+    end match;
+  end isParam;
+
   function isConst
     extends checkVar;
   algorithm

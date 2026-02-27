@@ -1258,7 +1258,7 @@ protected
     // (be careful with algebraic loops. this here assumes that cyclic dependencies have already been resolved)
     dependencies := match jacType
       case NBJacobian.JacobianType.ODE
-        then UnorderedSet.fold(dependencies, function addSubDependencies(map = map, checkFn = BVariable.isState), UnorderedSet.new(ComponentRef.hash, ComponentRef.isEqual));
+        then UnorderedSet.fold(dependencies, function addSubDependencies(map = map, checkFn = BVariable.isStateOrOptimizable), UnorderedSet.new(ComponentRef.hash, ComponentRef.isEqual));
       // TODO: for optimization these checks / checkFn are not valid yet, add free time
       case NBJacobian.JacobianType.OPT_LFG
         then UnorderedSet.fold(dependencies, function addSubDependencies(map = map, checkFn = BVariable.isStateOrOptimizable), UnorderedSet.new(ComponentRef.hash, ComponentRef.isEqual));

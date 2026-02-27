@@ -429,6 +429,10 @@ public
         then (EMPTY_SPARSITY_PATTERN, UnorderedMap.new<CrefLst>(ComponentRef.hash, ComponentRef.isEqual));
 
         case SOME(comps) algorithm
+          // print seedCandidates and partialCandidates
+          print("Seed candidates: " + VariablePointers.toString(seedCandidates) + "\n");
+          print("Partial candidates: " + VariablePointers.toString(partialCandidates) + "\n");
+
           // create index mapping only for variables
           seed_mapping    := Mapping.create(EquationPointers.empty(), seedCandidates);
           partial_mapping := Mapping.create(EquationPointers.empty(), partialCandidates);
@@ -477,7 +481,7 @@ public
           // create column-wise sparsity pattern
           for cref in listReverse(seed_vars) loop
             // TODO: check this condition for Optimization
-            if (jacType == JacobianType.NLS or BVariable.checkCref(cref, BVariable.isState, sourceInfo())
+            if (jacType == JacobianType.NLS or BVariable.checkCref(cref, BVariable.isState, sourceInfo()) or BVariable.checkCref(cref, BVariable.isParam, sourceInfo())
                 or (jacType == JacobianType.OPT_LFG or jacType == JacobianType.OPT_MRF or jacType == JacobianType.OPT_R0)) then
               tmp := UnorderedSet.unique_list(UnorderedMap.getSafe(cref, map, sourceInfo()), ComponentRef.hash, ComponentRef.isEqual);
               cols := (cref, tmp) :: cols;
@@ -1016,7 +1020,7 @@ protected
   protected
     JacobianType jacType;
     VariablePointers unknowns;
-    list<Pointer<Variable>> derivative_vars, state_vars;
+    list<Pointer<Variable>> derivative_vars, state_vars, param_vars, seed_state_and_param_vars;
     VariablePointers seedCandidates, partialCandidates;
     Option<Jacobian> jacobian, LFG_jacobian = NONE(), MRF_jacobian = NONE(), R0_jacobian = NONE()  "Resulting jacobians";
     Partition.Kind kind = Partition.Partition.getKind(part);
@@ -1044,7 +1048,11 @@ protected
 
       derivative_vars := list(var for var guard(BVariable.isStateDerivative(var)) in VariablePointers.toList(unknowns));
       state_vars := list(Util.getOption(BVariable.getVarState(var)) for var in derivative_vars);
-      seedCandidates := VariablePointers.fromList(state_vars, partialCandidates.scalarized);
+
+      // create list of param vars and append them to seed candidates
+      param_vars := list(var for var guard(BVariable.isParam(var)) in VariablePointers.toList(knowns));
+      seed_state_and_param_vars := listAppend(param_vars, state_vars);
+      seedCandidates := VariablePointers.fromList(seed_state_and_param_vars, partialCandidates.scalarized);
 
       jacobian := func(name, jacType, seedCandidates, partialCandidates, part.equations, part.strongComponents, part.adjacencyMatrix, funcMap, kind == NBPartition.Kind.INI);
 
@@ -1136,7 +1144,7 @@ protected
     end if;
 
     // create seed vars
-    VariablePointers.mapPtr(seedCandidates, function makeVarTraverse(name = name, vars_ptr = seed_vars_ptr, map = diff_map, makeVar = BVariable.makeSeedVar, init = init));
+    VariablePointers.mapPtr(seedCandidates, function makeVarTraverse(name = name, vars_ptr = seed_vars_ptr, map = diff_map, makeVar = BVariable.makeSeedVar, init = init, allowParamPDer = false));
 
     // create pDer vars (also filters out discrete vars)
     (res_vars, tmp_vars) := List.splitOnTrue(VariablePointers.toList(partialCandidates), func);
@@ -1464,7 +1472,7 @@ protected
     end if;
 
     // create seed vars
-    for v in VariablePointers.toList(seedCandidates) loop makeVarTraverse(v, newName, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init = init); end for;
+    for v in VariablePointers.toList(seedCandidates) loop makeVarTraverse(v, newName, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init = init, allowParamPDer = true); end for;
     res_vars := Pointer.access(pDer_vars_ptr);
 
     // create pDer vars (also filters out discrete vars)
@@ -1886,6 +1894,7 @@ protected
     input UnorderedMap<ComponentRef,ComponentRef> map;
     input Func makeVar;
     input Boolean init;
+    input Boolean allowParamPDer = false;
 
     partial function Func
       input output ComponentRef cref;
@@ -1898,7 +1907,7 @@ protected
     Pointer<Variable> diff_ptr, parent, diff_parent;
   algorithm
     // only create seed or pDer var if it is continuous
-    if BVariable.isContinuous(var_ptr, init) then
+    if BVariable.isContinuous(var_ptr, init) or (allowParamPDer and BVariable.isParam(var_ptr)) then
       // make the new differentiated variable itself
       (diff, diff_ptr) := makeVar(var.name, name);
       // add $<new>.x variable pointer to the variables
