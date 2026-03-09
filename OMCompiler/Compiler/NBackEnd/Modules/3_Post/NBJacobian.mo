@@ -1159,6 +1159,7 @@ protected
       scalarized      = seedCandidates.scalarized,
       adjoint_map     = NONE(),
       current_grad    = Expression.EMPTY(Type.REAL()),
+      root_seed_cref  = ComponentRef.EMPTY(),
       collectAdjoints = false
     );
 
@@ -1217,6 +1218,62 @@ protected
       else SizeClassification.ELEMENT_WISE;
     end match;
   end sizeClassificationFromType;
+
+  // Helper: group tagged adjoint terms by root seed cref, preserving first-occurrence order of seeds.
+  function groupTaggedTermsByRootSeed
+    input list<tuple<ComponentRef, Expression>> taggedTerms;
+    output list<tuple<ComponentRef, list<Expression>>> groups;
+  protected
+    type ExprList = list<Expression>;
+    UnorderedMap<ComponentRef, ExprList> seedMap =
+      UnorderedMap.new<ExprList>(ComponentRef.hash, ComponentRef.isEqual);
+    list<ComponentRef> seedOrder = {};
+    ComponentRef sc;
+    Expression se;
+
+    function prependToList
+      input Option<ExprList> oldOpt;
+      input Expression elem;
+      output ExprList newList;
+    algorithm
+      newList := match oldOpt
+        case SOME(newList) then (elem :: newList);
+        else {elem};
+      end match;
+    end prependToList;
+
+  algorithm
+    // Print taggedTerms
+    print("taggedTerms (" + intString(listLength(taggedTerms)) + " entries):\n");
+    for t in taggedTerms loop
+      (sc, se) := t;
+      print("  (" + ComponentRef.toString(sc) + ", " + Expression.toString(se) + ")\n");
+    end for;
+    for t in taggedTerms loop
+      (sc, se) := t;
+      if not UnorderedMap.contains(sc, seedMap) then
+        seedOrder := sc :: seedOrder;
+      end if;
+      UnorderedMap.tryAddUpdate(sc, function prependToList(elem = se), seedMap);
+    end for;
+
+    // Print seedMap
+    print("seedMap:\n");
+    for sc in seedOrder loop
+      print("  " + ComponentRef.toString(sc) + " -> [");
+      print(stringDelimitList(list(Expression.toString(se) for se in UnorderedMap.getOrFail(sc, seedMap)), ", "));
+      print("]\n");
+    end for;
+
+    for sc in seedOrder loop
+      print("Seed: " + ComponentRef.toString(sc) + "\n");
+      for se in UnorderedMap.getSafe(sc, seedMap, sourceInfo()) loop
+        print("  Term: " + Expression.toString(se) + "\n");
+      end for;
+    end for;
+    seedOrder := listReverse(seedOrder);
+    groups := list((sc, listReverse(UnorderedMap.getSafe(sc, seedMap, sourceInfo()))) for sc in seedOrder);
+  end groupTaggedTermsByRootSeed;
 
   // Helper: build addition (or single term) expression from a list of terms for a given LHS cref.
   function buildAdjointRhs
@@ -1277,7 +1334,7 @@ protected
     input UnorderedMap<ComponentRef,ComponentRef> diff_map;
     input UnorderedMap<Path, Function> funcMapIn;
     input Boolean scalarized;
-    input UnorderedMap<ComponentRef, list<Expression>> adjoint_map_in;
+    input UnorderedMap<ComponentRef, list<tuple<ComponentRef, Expression>>> adjoint_map_in;
     output Differentiate.DifferentiationArguments diffArguments;
   algorithm
     // Prepare args to collect adjoints into the incoming map
@@ -1290,6 +1347,7 @@ protected
       scalarized      = scalarized,
       adjoint_map     = SOME(adjoint_map_in),
       current_grad    = seed,
+      root_seed_cref  = ComponentRef.EMPTY(),
       collectAdjoints = true
     );
 
@@ -1359,19 +1417,20 @@ protected
 
   function makeAdjointComponent
     input ComponentRef lhsKey;
-    input UnorderedMap<ComponentRef, list<Expression>> adjoint_map;
+    input UnorderedMap<ComponentRef, list<tuple<ComponentRef, Expression>>> adjoint_map;
     input String contextName;
     input Integer eqIndex;
     output NBStrongComponent diffed_comp;
   protected
+    list<tuple<ComponentRef, Expression>> taggedTerms;
     list<Expression> terms;
     Expression rhsExpr;
     Pointer<NBEquation.Equation> eqPtr;
     NBEquation.Equation eq;
     Pointer<Variable> lhsVarPtr;
   algorithm
-    terms := UnorderedMap.getOrFail(lhsKey, adjoint_map);
-
+    taggedTerms := UnorderedMap.getOrFail(lhsKey, adjoint_map);
+    terms := list(Util.tuple22(t) for t in taggedTerms);
     rhsExpr := buildAdjointRhs(lhsKey, terms);
 
     diffed_comp := makeAdjointComponentFromRhs(lhsKey, rhsExpr, contextName, eqIndex);
@@ -1441,7 +1500,7 @@ protected
   function addEntryToLPAMap
     input Pointer<Variable> vptr;
     input UnorderedMap<ComponentRef, ComponentRef> diff_map;
-    input UnorderedMap<ComponentRef, list<Expression>> loop_product_adjoint_map;
+    input UnorderedMap<ComponentRef, list<tuple<ComponentRef, Expression>>> loop_product_adjoint_map;
   protected
     Option<ComponentRef> mappedSeed;
   algorithm
@@ -1524,8 +1583,9 @@ protected
     ComponentRef newC, c;
 
     BVariable.checkVar func = getTmpFilterFunction(jacType);
-    type ExpressionList = list<Expression>; // for saving terms for the same lhs in a map
-    UnorderedMap<ComponentRef, list<Expression>> adjoint_map;
+    type AdjointTermList = list<tuple<ComponentRef, Expression>>; // tagged terms: (root_seed_cref, expression)
+    UnorderedMap<ComponentRef, list<tuple<ComponentRef, Expression>>> adjoint_map;
+    list<tuple<ComponentRef, Expression>> taggedTerms;
     list<Expression> terms, dF_in, dF_out;
     Expression rhsExpr;
     Pointer<Variable> lhsVarPtr;
@@ -1547,7 +1607,12 @@ protected
     VariablePointers tmpVarsVP;
     EquationPointers tmpEqnsEP;
     Matching matchingTmp;
-    list<StrongComponent> tmpComps = {}, resComps = {};
+    list<StrongComponent> tmp_per_seed_comps = {}, res_per_seed_comps = {};
+    list<StrongComponent> fallbackResetComps = {};
+    list<ComponentRef> resetSeeds = {};
+    list<tuple<ComponentRef, list<Expression>>> seedGroups;
+    list<Expression> groupExprs;
+    ComponentRef seedCrefG;
 
     list<ComponentRef> orderedTmpCrefs = {};
     ComponentRef baseCref, pDerCref;
@@ -1567,6 +1632,8 @@ protected
             getInstanceName() + " only supports SINGLE_COMPONENT, MULTI_COMPONENT, SLICED_COMPONENT, RESIZABLE_COMPONENT and ALGEBRAIC_LOOP in symbolic adjoint jacobian generation!"
           });
           fail();
+        else
+          print("Processing strong component " + StrongComponent.toString(c) + "\n");
         end if;
       end for;
     else
@@ -1601,7 +1668,7 @@ protected
     tmp_vars := Pointer.access(pDer_vars_ptr);
 
     // create adjoint map with seed vars and tmp vars as keys mapping to empty lists
-    adjoint_map := UnorderedMap.new<ExpressionList>(ComponentRef.hash, ComponentRef.isEqual, listLength(res_vars) + listLength(tmp_vars));
+    adjoint_map := UnorderedMap.new<AdjointTermList>(ComponentRef.hash, ComponentRef.isEqual, listLength(res_vars) + listLength(tmp_vars));
     for v in res_vars loop
       UnorderedMap.tryAdd(BVariable.getVarName(v), {}, adjoint_map);
     end for;
@@ -1630,7 +1697,7 @@ protected
           // misc
           Tearing tearing;
           Integer iRes;
-          list<Expression> terms_x;
+          list<tuple<ComponentRef, Expression>> terms_x;
           Expression rhs_x;
 
           UnorderedMap<ComponentRef, ComponentRef> diff_map_y =
@@ -1640,14 +1707,14 @@ protected
             UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
           UnorderedMap<ComponentRef, ComponentRef> diff_map_union =
             UnorderedMap.new<ComponentRef>(ComponentRef.hash, ComponentRef.isEqual);
-          UnorderedMap<ComponentRef, list<Expression>> loop_product_adjoint_map =
-            UnorderedMap.new<ExpressionList>(ComponentRef.hash, ComponentRef.isEqual);
+          UnorderedMap<ComponentRef, list<tuple<ComponentRef, Expression>>> loop_product_adjoint_map =
+            UnorderedMap.new<AdjointTermList>(ComponentRef.hash, ComponentRef.isEqual);
           ComponentRef baseX, pDerX;
           Option<ComponentRef> o_pDerX;
           list<Pointer<Variable>> seedPtrListX;
 
           list<Pointer<NBEquation.Equation>> linResEqnPtrs = {};
-          list<Expression> terms_j;
+          list<tuple<ComponentRef, Expression>> terms_j;
           Expression lhs_j, rhs_j;
           Pointer<NBEquation.Equation> resid_j;
           Option<ComponentRef> o_ySeedCref;
@@ -1743,7 +1810,7 @@ protected
                 terms_j := UnorderedMap.getOrDefault(ySeedCref, loop_product_adjoint_map, {});
 
                 // Build LHS as sum of terms (or 0 if empty)
-                lhs_j := buildAdjointRhs(ySeedCref, terms_j);
+                lhs_j := buildAdjointRhs(ySeedCref, list(Util.tuple22(t) for t in terms_j));
 
                 // RHS is the y_bar variable itself
                 rhs_j := Expression.fromCref(ySeedCref);
@@ -1801,7 +1868,7 @@ protected
 
                 // Sum terms using correct type/operator for the LHS variable
                 // and apply required minus sign
-                rhs_x := Expression.negate(buildAdjointRhs(pDerX, terms_x));
+                rhs_x := Expression.negate(buildAdjointRhs(pDerX, list(Util.tuple22(t) for t in terms_x)));
 
                 // Emit x-bar post accumulation as explicit components after loop solve.
                 algebraicPostUpdates := (pDerX, rhs_x) :: algebraicPostUpdates;
@@ -1831,6 +1898,7 @@ protected
       scalarized      = seedCandidates.scalarized,
       adjoint_map     = SOME(adjoint_map),
       current_grad    = Expression.EMPTY(Type.REAL()),
+      root_seed_cref  = ComponentRef.EMPTY(),
       collectAdjoints = true
     );
 
@@ -1907,34 +1975,45 @@ protected
       end if;
     end for;
     orderedTmpCrefs := listReverse(orderedTmpCrefs);
-    // Emit tmp components in determined order as accumulation + reset.
+
+
+    print("After orderedTmpCrefs.\n");
+
+    // Emit tmp components per-seed: for each destination collect grouped terms and
+    // emit one accumulation per seed group followed by a reset of that seed.
     for lhsKey in orderedTmpCrefs loop
       if UnorderedMap.contains(lhsKey, structuredAssigned) then
         if Flags.isSet(Flags.DEBUG_ADJOINT) then
           print("[adjoint] skip map tmp emission already handled structurally for " + ComponentRef.toString(lhsKey) + "\n");
         end if;
       else
-        terms := UnorderedMap.getOrFail(lhsKey, adjoint_map);
-        contribution := buildAdjointRhs(lhsKey, terms);
-        if expressionHasIterator(contribution) then
-          if Flags.isSet(Flags.DEBUG_ADJOINT) then
-            print("[adjoint] skip iterator-dependent tmp emission for " + ComponentRef.toString(lhsKey) + ": " + Expression.toString(contribution) + "\n");
-          end if;
-        else
-           if (listLength(terms) == 1 and Expression.isEqual(listHead(terms), Expression.fromCref(lhsKey)))
-             or isNoOpAdjointContribution(lhsKey, contribution) then
-            // No-op accumulation; only keep reset in the reverse sweep.
-            tmpComps := makeAdjointResetComponent(lhsKey, newName, i) :: tmpComps;
+        taggedTerms := UnorderedMap.getOrFail(lhsKey, adjoint_map);
+        seedGroups := groupTaggedTermsByRootSeed(listReverse(taggedTerms));
+        for seedGroup in seedGroups loop
+          (seedCrefG, groupExprs) := seedGroup;
+          contribution := buildAdjointRhs(lhsKey, groupExprs);
+          if not (expressionHasIterator(contribution) or isNoOpAdjointContribution(lhsKey, contribution)) then
+            tmp_per_seed_comps := makeAdjointAccumulationComponent(lhsKey, contribution, newName, i) :: tmp_per_seed_comps;
             i := i + 1;
-          else
-            tmpComps := makeAdjointResetComponent(lhsKey, newName, i + 1)
-              :: makeAdjointAccumulationComponent(lhsKey, contribution, newName, i)
-              :: tmpComps;
-            i := i + 2;
           end if;
-        end if;
+          if not List.contains(resetSeeds, seedCrefG, ComponentRef.isEqual) then
+            tmp_per_seed_comps := makeAdjointResetComponent(seedCrefG, newName, i) :: tmp_per_seed_comps;
+            resetSeeds := seedCrefG :: resetSeeds;
+            i := i + 1;
+          end if;
+        end for;
       end if;
     end for;
+
+    if Flags.isSet(Flags.DEBUG_ADJOINT) then
+      for c in tmp_per_seed_comps loop
+        print("[adjoint] tmp per-seed component: " + StrongComponent.toString(c) + "\n");
+      end for;
+      if listEmpty(tmp_per_seed_comps) then
+        print("[adjoint] no tmp per-seed components to emit.\n");
+      end if;
+    end if;
+    print("After tmp_per_seed_comps.\n");
 
     // Emit any remaining tmp vars (e.g. lambda temporaries) not in orderedTmpCrefs.
     for v in tmp_vars loop
@@ -1946,49 +2025,66 @@ protected
             print("[adjoint] skip map tmp emission already handled structurally for " + ComponentRef.toString(baseCref) + "\n");
           end if;
         else
-          terms := UnorderedMap.getOrFail(baseCref, adjoint_map);
-          contribution := buildAdjointRhs(baseCref, terms);
-          if expressionHasIterator(contribution) then
-            if Flags.isSet(Flags.DEBUG_ADJOINT) then
-              print("[adjoint] skip iterator-dependent tmp emission for " + ComponentRef.toString(baseCref) + ": " + Expression.toString(contribution) + "\n");
-            end if;
-          else
-            if (listLength(terms) == 1 and Expression.isEqual(listHead(terms), Expression.fromCref(baseCref)))
-               or isNoOpAdjointContribution(baseCref, contribution) then
-              tmpComps := makeAdjointResetComponent(baseCref, newName, i) :: tmpComps;
+          taggedTerms := UnorderedMap.getOrFail(baseCref, adjoint_map);
+          seedGroups := groupTaggedTermsByRootSeed(listReverse(taggedTerms));
+          for seedGroup in seedGroups loop
+            (seedCrefG, groupExprs) := seedGroup;
+            contribution := buildAdjointRhs(baseCref, groupExprs);
+            if not (expressionHasIterator(contribution) or isNoOpAdjointContribution(baseCref, contribution)) then
+              tmp_per_seed_comps := makeAdjointAccumulationComponent(baseCref, contribution, newName, i) :: tmp_per_seed_comps;
               i := i + 1;
-            else
-              tmpComps := makeAdjointResetComponent(baseCref, newName, i + 1)
-                :: makeAdjointAccumulationComponent(baseCref, contribution, newName, i)
-                :: tmpComps;
-              i := i + 2;
             end if;
-          end if;
+            if not List.contains(resetSeeds, seedCrefG, ComponentRef.isEqual) then
+              tmp_per_seed_comps := makeAdjointResetComponent(seedCrefG, newName, i) :: tmp_per_seed_comps;
+              resetSeeds := seedCrefG :: resetSeeds;
+              i := i + 1;
+            end if;
+          end for;
         end if;
       end if;
     end for;
-    tmpComps := listReverse(tmpComps);
+    tmp_per_seed_comps := listReverse(tmp_per_seed_comps);
 
-    // emit result variable components in any order
-    resComps := {};
+    if Flags.isSet(Flags.DEBUG_ADJOINT) then
+      for c in tmp_per_seed_comps loop
+        print("[adjoint] tmp per-seed component: " + StrongComponent.toString(c) + "\n");
+      end for;
+      if listEmpty(tmp_per_seed_comps) then
+        print("[adjoint] no tmp per-seed components to emit.\n");
+      end if;
+    end if;
+    print("After remaining tmp vars.\n");
+
+    // Emit result variable components per-seed.
     for v in res_vars loop
       c := BVariable.getVarName(v);
-      if UnorderedMap.contains(c, adjoint_map) and not UnorderedMap.contains(c, structuredAssigned) then
-        terms := UnorderedMap.getOrFail(c, adjoint_map);
-        contribution := buildAdjointRhs(c, terms);
-        if expressionHasIterator(contribution) then
-          if Flags.isSet(Flags.DEBUG_ADJOINT) then
-            print("[adjoint] skip iterator-dependent result emission for " + ComponentRef.toString(c) + ": " + Expression.toString(contribution) + "\n");
+      if UnorderedMap.contains(c, adjoint_map) then
+        taggedTerms := UnorderedMap.getOrFail(c, adjoint_map);
+        for t in listReverse(taggedTerms) loop
+          (seedCrefG, contribution) := t;
+          if not (expressionHasIterator(contribution) or isNoOpAdjointContribution(c, contribution)) then
+            res_per_seed_comps := makeAdjointAccumulationComponent(c, contribution, newName, i) :: res_per_seed_comps;
+            i := i + 1;
           end if;
-        elseif not ((listLength(terms) == 1 and Expression.isEqual(listHead(terms), Expression.fromCref(c)))
-                 or isNoOpAdjointContribution(c, contribution)) then
-          resComps := makeAdjointAccumulationComponent(c, contribution, newName, i) :: resComps;
-          i := i + 1;
-        end if;
+          if not List.contains(resetSeeds, seedCrefG, ComponentRef.isEqual) then
+            res_per_seed_comps := makeAdjointResetComponent(seedCrefG, newName, i) :: res_per_seed_comps;
+            resetSeeds := seedCrefG :: resetSeeds;
+            i := i + 1;
+          end if;
+        end for;
       end if;
     end for;
-    resComps := listReverse(resComps);
-    // no reversal needed as order does not matter?
+    res_per_seed_comps := listReverse(res_per_seed_comps);
+
+    if Flags.isSet(Flags.DEBUG_ADJOINT) then
+      for c in res_per_seed_comps loop
+        print("[adjoint] res per-seed component: " + StrongComponent.toString(c) + "\n");
+      end for;
+      if listEmpty(res_per_seed_comps) then
+        print("[adjoint] no res per-seed components to emit.\n");
+      end if;
+    end if;
+    print("After res_per_seed_comps.\n");
 
     // Emit post-loop x-bar accumulation components after linear algebraic loop solve.
     for up in listReverse(algebraicPostUpdates) loop
@@ -2008,8 +2104,49 @@ protected
     end for;
     algebraicPostComps := listReverse(algebraicPostComps);
 
+    if Flags.isSet(Flags.DEBUG_ADJOINT) then
+      for c in algebraicPostComps loop
+        print("[adjoint] algebraic post component: " + StrongComponent.toString(c) + "\n");
+      end for;
+    end if;
+    print("After algebraic post components.\n");
+
+    // Fallback resets: for any tmp_var or seed_var whose cref was not yet in resetSeeds.
+    for v in tmp_vars loop
+      c := BVariable.getVarName(v);
+      if not List.contains(resetSeeds, c, ComponentRef.isEqual) then
+        fallbackResetComps := makeAdjointResetComponent(c, newName, i) :: fallbackResetComps;
+        resetSeeds := c :: resetSeeds;
+        i := i + 1;
+      end if;
+    end for;
+    for v in seed_vars loop
+      c := BVariable.getVarName(v);
+      if not List.contains(resetSeeds, c, ComponentRef.isEqual) then
+        fallbackResetComps := makeAdjointResetComponent(c, newName, i) :: fallbackResetComps;
+        resetSeeds := c :: resetSeeds;
+        i := i + 1;
+      end if;
+    end for;
+    fallbackResetComps := listReverse(fallbackResetComps);
+
+    if Flags.isSet(Flags.DEBUG_ADJOINT) then
+      for c in fallbackResetComps loop
+        print("[adjoint] fallback reset component: " + StrongComponent.toString(c) + "\n");
+      end for;
+    end if;
+    print("After fallback reset components.\n");
     // here are also the loop components from above which might be empty though if there are none
-    diffed_comps := listAppend(diffedIteratorComps, listAppend(tmpComps, listAppend(algebraicLoopComps, listAppend(algebraicPostComps, resComps))));
+    diffed_comps := listAppend(diffedIteratorComps, listAppend(tmp_per_seed_comps, listAppend(algebraicLoopComps, listAppend(algebraicPostComps, listAppend(res_per_seed_comps, fallbackResetComps)))));
+
+    if Flags.isSet(Flags.DEBUG_ADJOINT) then
+      print("Final list of differentiated components:\n");
+      for c in diffed_comps loop
+        print(StrongComponent.toString(c) + "\n");
+      end for;
+    end if;
+
+    print("Finished symbolic adjoint differentiation.\n");
 
     // collect var data (most of this can be removed)
     unknown_vars  := listAppend(res_vars, tmp_vars);
@@ -2165,18 +2302,20 @@ protected
 
   function adjointMapToString
     "Pretty print the optional adjoint_map:
-       { cref1 -> [e1, e2, ...]; cref2 -> [ ... ]; }
+       { cref1 -> [(seed1, e1), (seed2, e2), ...]; cref2 -> [ ... ]; }
      If NONE() => {}"
-    input Option<UnorderedMap<ComponentRef, list<Expression>>> adjoint_map;
+    input Option<UnorderedMap<ComponentRef, list<tuple<ComponentRef, Expression>>>> adjoint_map;
     output String str;
   protected
-    UnorderedMap<ComponentRef, list<Expression>> map;
+    UnorderedMap<ComponentRef, list<tuple<ComponentRef, Expression>>> map;
 
     function valueToString
-      input list<Expression> elst;
+      input list<tuple<ComponentRef, Expression>> elst;
       output String vstr;
     algorithm
-      vstr := "[" + stringDelimitList(list(Expression.toString(e) for e in elst), ", ") + "]";
+      vstr := "[" + stringDelimitList(list(
+        "(" + ComponentRef.toString(Util.tuple21(t)) + ", " + Expression.toString(Util.tuple22(t)) + ")"
+        for t in elst), ", ") + "]";
     end valueToString;
   algorithm
     if Util.isNone(adjoint_map) then
