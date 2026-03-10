@@ -700,7 +700,7 @@ public
             allStmts := s :: allStmts;
           end for;
         end for;
-        // allStmts is already in LIFO (reversed) order
+        allStmts := listReverse(allStmts);
 
         // Wrap in nested FOR statements with reversed iterator ranges
         stmts := allStmts;
@@ -727,7 +727,6 @@ public
             allStmts := bs :: allStmts;
           end for;
         end for;
-        // allStmts is in LIFO order
         stmts := allStmts;
       then (diffArguments, stmts);
 
@@ -786,7 +785,6 @@ public
             vty,
             DAE.emptyElementSource
           ) :: stmts;
-          stmts := listReverse(stmts);
         else
           stmts := {};
         end if;
