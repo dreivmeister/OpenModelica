@@ -522,7 +522,10 @@ public
 
         // For-equation locals
         list<Statement> bodyStmts, allStmts;
-        Equation bodyEqn;
+        Equation bodyEqn, splitEq;
+        NBEquation.Iterator splitIter;
+        list<Equation> splitBody;
+        DAE.ElementSource splitSource;
 
         // If-equation locals
         IfEquationBody ifBody;
@@ -692,8 +695,11 @@ public
 
       // ===================== FOR_EQUATION =====================
       case Equation.FOR_EQUATION() algorithm
+        splitEq := NBEquation.Equation.splitIterators(eq);
+        // splitIterators returns uniontype Equation; destructure before field access.
+        Equation.FOR_EQUATION(iter = splitIter, body = splitBody, source = splitSource) := splitEq;
         allStmts := {};
-        for bodyEqn in eq.body loop
+        for bodyEqn in splitBody loop
           (diffArguments, bodyStmts) := differentiateEquationAdjoint(bodyEqn, diffArguments);
           // Prepend (LIFO order within the for body)
           for s in bodyStmts loop
@@ -704,7 +710,7 @@ public
 
         // Wrap in nested FOR statements with reversed iterator ranges
         stmts := allStmts;
-        revIter := reverseEquationIterator(eq.iter);
+        revIter := reverseEquationIterator(splitIter);
         (iterNames, iterRanges, iterMaps) := NBEquation.Iterator.getFrames(revIter);
         for tpl in listReverse(List.zip(iterNames, iterRanges)) loop
           (iterName, iterRange) := tpl;
@@ -713,7 +719,7 @@ public
             SOME(iterRange),
             stmts,
             Statement.ForType.NORMAL(),
-            DAE.emptyElementSource
+            splitSource
           )};
         end for;
       then (diffArguments, stmts);
@@ -902,7 +908,8 @@ public
           terms := list(Util.tuple22(t) for t in taggedTerms);
 
           // Build RHS: key + sum(terms)
-          vty := ComponentRef.getComponentType(key);
+          // Use subscripted type so indexed crefs in FOR bodies become scalar assignments.
+          vty := ComponentRef.getSubscriptedType(key, true);
           if List.hasOneElement(terms) then
             accRhs := listHead(terms);
           else
@@ -1428,8 +1435,8 @@ public
             end match;
             dbg("[dCREF:JAC] append adjoint key=" + ComponentRef.toString(derCref)
                 + " expr=" + Expression.toString(adjExpr));
-            // Keep symbolic subscripts (e.g. iterator indices) on adjoint keys when
-            // available so loop contributions can be emitted with correct indexing.
+            // Keep symbolic subscripts (e.g. -1 + i) on adjoint keys so loop
+            // contributions emit indexed pDER updates in generated C.
             adjointKey := match expCrefSubscripts
               case {} then derCref;
               else if subscriptsHaveIterator(expCrefSubscripts)
