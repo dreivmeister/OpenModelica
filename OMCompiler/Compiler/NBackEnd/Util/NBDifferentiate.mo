@@ -2846,35 +2846,20 @@ public
 
       // II. delegate differentiation to body and only return differentiated statement
       case diff_stmt as Statement.FOR() algorithm
-<<<<<<< HEAD
         body_stmts := if isReverse then listReverse(diff_stmt.body) else diff_stmt.body;
         (branch_stmts, diffArguments) := List.mapFold(body_stmts, function differentiateStatement(diffInfo = diffInfo), diffArguments);
-=======
-        body_stmts := diff_stmt.body;
-        (branch_stmts, diffArguments) := List.mapFold(body_stmts, differentiateStatement, diffArguments);
->>>>>>> 1d1ae2da94 (remove some deprecation)
         diff_stmt.body := List.flatten(branch_stmts);
       then {diff_stmt};
 
       case diff_stmt as Statement.WHILE() algorithm
-<<<<<<< HEAD
         body_stmts := if isReverse then listReverse(diff_stmt.body) else diff_stmt.body;
         (branch_stmts, diffArguments) := List.mapFold(body_stmts, function differentiateStatement(diffInfo = diffInfo), diffArguments);
-=======
-        body_stmts := diff_stmt.body;
-        (branch_stmts, diffArguments) := List.mapFold(body_stmts, differentiateStatement, diffArguments);
->>>>>>> 1d1ae2da94 (remove some deprecation)
         diff_stmt.body := List.flatten(branch_stmts);
       then {diff_stmt};
 
       case diff_stmt as Statement.FAILURE() algorithm
-<<<<<<< HEAD
         body_stmts := if isReverse then listReverse(diff_stmt.body) else diff_stmt.body;
         (branch_stmts, diffArguments) := List.mapFold(body_stmts, function differentiateStatement(diffInfo = diffInfo), diffArguments);
-=======
-        body_stmts := diff_stmt.body;
-        (branch_stmts, diffArguments) := List.mapFold(body_stmts, differentiateStatement, diffArguments);
->>>>>>> 1d1ae2da94 (remove some deprecation)
         diff_stmt.body := List.flatten(branch_stmts);
       then {diff_stmt};
 
@@ -2882,14 +2867,10 @@ public
         if_when_branches := diff_stmt.branches;
         for branch in if_when_branches loop
           (exp, branch_stmts_flat) := branch;
-<<<<<<< HEAD
           if isReverse then
             branch_stmts_flat := listReverse(branch_stmts_flat);
           end if;
           (branch_stmts, diffArguments) := List.mapFold(branch_stmts_flat, function differentiateStatement(diffInfo = diffInfo), diffArguments);
-=======
-          (branch_stmts, diffArguments) := List.mapFold(branch_stmts_flat, differentiateStatement, diffArguments);
->>>>>>> 1d1ae2da94 (remove some deprecation)
           branches := (exp, List.flatten(branch_stmts)) :: branches;
         end for;
         diff_stmt.branches := listReverse(branches);
@@ -2899,14 +2880,10 @@ public
         if_when_branches := diff_stmt.branches;
         for branch in if_when_branches loop
           (exp, branch_stmts_flat) := branch;
-<<<<<<< HEAD
           if isReverse then
             branch_stmts_flat := listReverse(branch_stmts_flat);
           end if;
           (branch_stmts, diffArguments) := List.mapFold(branch_stmts_flat, function differentiateStatement(diffInfo = diffInfo), diffArguments);
-=======
-          (branch_stmts, diffArguments) := List.mapFold(branch_stmts_flat, differentiateStatement, diffArguments);
->>>>>>> 1d1ae2da94 (remove some deprecation)
           branches := (exp, List.flatten(branch_stmts)) :: branches;
         end for;
         diff_stmt.branches := listReverse(branches);
