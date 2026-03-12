@@ -113,6 +113,11 @@ public
           end if;
           if Util.isSome(association.jacobianAdjoint) then
             str := BJacobian.toString(Util.getOption(association.jacobianAdjoint), Partition.kindToString(association.kind) + " Adjoint") + "\n";
+            if (Flags.getConfigBool(Flags.MOO_DYNAMIC_OPTIMIZATION)) then
+              str := "\n" + str + BJacobian.toString(Util.getOption(association.LFG_jacobian), Partition.kindToString(association.kind));
+              str := "\n" + str + BJacobian.toString(Util.getOption(association.MRF_jacobian), Partition.kindToString(association.kind));
+              str := "\n" + str + BJacobian.toString(Util.getOption(association.R0_jacobian), Partition.kindToString(association.kind));
+            end if;
           end if;
         then str;
         case CLOCKED() algorithm

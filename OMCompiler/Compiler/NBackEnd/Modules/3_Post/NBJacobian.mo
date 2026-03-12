@@ -1065,6 +1065,7 @@ protected
       if Flags.isSet(Flags.JAC_DUMP) then
         print(Partition.Partition.toString(part, 2));
       end if;
+      print(Partition.Association.toString(part.association));
     end if;
   end partJacobian;
 
@@ -1136,17 +1137,17 @@ protected
     end if;
 
     // create seed vars
-    VariablePointers.mapPtr(seedCandidates, function makeVarTraverse(name = name, vars_ptr = seed_vars_ptr, map = diff_map, makeVar = BVariable.makeSeedVar, init = init));
+    VariablePointers.mapPtr(seedCandidates, function makeVarTraverse(name = name, vars_ptr = seed_vars_ptr, map = diff_map, makeVar = BVariable.makeSeedVar, init = init, allowParamPDer = true));
 
     // create pDer vars (also filters out discrete vars)
     (res_vars, tmp_vars) := List.splitOnTrue(VariablePointers.toList(partialCandidates), func);
     (tmp_vars, _) := List.splitOnTrue(tmp_vars, function BVariable.isContinuous(init = init));
 
-    for v in res_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init = init); end for;
+    for v in res_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init = init, allowParamPDer = false); end for;
     res_vars := Pointer.access(pDer_vars_ptr);
 
     pDer_vars_ptr := Pointer.create({});
-    for v in tmp_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = true), init = init); end for;
+    for v in tmp_vars loop makeVarTraverse(v, name, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = true), init = init, allowParamPDer = false); end for;
     tmp_vars := Pointer.access(pDer_vars_ptr);
 
     // Build differentiation argument structure
@@ -1448,6 +1449,7 @@ protected
       comps := list(comp for comp guard(not StrongComponent.isDiscrete(comp)) in Util.getOption(strongComponents));
       // only allow single components and algebraic loops
       for c in comps loop
+        print("Processing strong component " + StrongComponent.toString(c) + "\n");
         if not StrongComponent.isSingleComponent(c) and not StrongComponent.isAlgebraicLoop(c) then
           Error.addMessage(Error.INTERNAL_ERROR, {getInstanceName() + " only supports SINGLE_COMPONENT and ALGEBRAIC_LOOP!"});
           fail();
@@ -1464,14 +1466,14 @@ protected
     end if;
 
     // create seed vars
-    for v in VariablePointers.toList(seedCandidates) loop makeVarTraverse(v, newName, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init = init); end for;
+    for v in VariablePointers.toList(seedCandidates) loop makeVarTraverse(v, newName, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = false), init = init, allowParamPDer = true); end for;
     res_vars := Pointer.access(pDer_vars_ptr);
 
     // create pDer vars (also filters out discrete vars)
     (old_res_vars, tmp_vars) := List.splitOnTrue(VariablePointers.toList(partialCandidates), func);
     (tmp_vars, _) := List.splitOnTrue(tmp_vars, function BVariable.isContinuous(init = init));
 
-    for v in old_res_vars loop makeVarTraverse(v, newName, seed_vars_ptr, diff_map, BVariable.makeSeedVar, init = init); end for;
+    for v in old_res_vars loop makeVarTraverse(v, newName, seed_vars_ptr, diff_map, BVariable.makeSeedVar, init = init, allowParamPDer = false); end for;
     seed_vars := Pointer.access(seed_vars_ptr);
 
     if Flags.isSet(Flags.DEBUG_ADJOINT) then
@@ -1481,7 +1483,7 @@ protected
     end if;
 
     pDer_vars_ptr := Pointer.create({});
-    for v in tmp_vars loop makeVarTraverse(v, newName, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = true), init = init); end for;
+    for v in tmp_vars loop makeVarTraverse(v, newName, pDer_vars_ptr, diff_map, function BVariable.makePDerVar(isTmp = true), init = init, allowParamPDer = false); end for;
     tmp_vars := Pointer.access(pDer_vars_ptr);
 
     // create adjoint map with seed vars and tmp vars as keys mapping to empty lists
@@ -1886,6 +1888,7 @@ protected
     input UnorderedMap<ComponentRef,ComponentRef> map;
     input Func makeVar;
     input Boolean init;
+    input Boolean allowParamPDer;
 
     partial function Func
       input output ComponentRef cref;
@@ -1898,7 +1901,7 @@ protected
     Pointer<Variable> diff_ptr, parent, diff_parent;
   algorithm
     // only create seed or pDer var if it is continuous
-    if BVariable.isContinuous(var_ptr, init) then
+    if BVariable.isContinuous(var_ptr, init) or (allowParamPDer and BVariable.isParam(var_ptr)) then
       // make the new differentiated variable itself
       (diff, diff_ptr) := makeVar(var.name, name);
       // add $<new>.x variable pointer to the variables
