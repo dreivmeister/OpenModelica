@@ -2154,6 +2154,9 @@ protected
       print("Adjoint sparsity pattern and coloring:\n");
       print(SparsityPattern.toString(sparsityPattern) + "\n" + SparsityColoring.toString(sparsityColoring) + "\n");
     end if;
+    //print("number of column colors: " + intString(arrayLength(sparsityColoring.cols)) + "\n");
+    //print("number of row colors: " + intString(arrayLength(sparsityColoring.rows)) + "\n");
+    //print(boolString(arrayLength(sparsityColoring.cols) > arrayLength(sparsityColoring.rows)) + "\n");
 
     jacobian := SOME(Jacobian.JACOBIAN(
       name              = newName,
