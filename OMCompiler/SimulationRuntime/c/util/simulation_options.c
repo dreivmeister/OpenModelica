@@ -1347,7 +1347,8 @@ const char *JACOBIAN_METHOD_NAME[JAC_MAX] = {
   "internalNumerical",
   "coloredSymbolical",
   "numerical",
-  "symbolical"
+  "symbolical",
+  "bicoloredSymbolical"
 };
 
 const char *JACOBIAN_METHOD_DESC[JAC_MAX] = {
@@ -1358,6 +1359,7 @@ const char *JACOBIAN_METHOD_DESC[JAC_MAX] = {
   "Colored symbolical Jacobian. Needs omc compiler flag --generateDynamicJacobian=symbolic. With option -idaLS=klu a sparse matrix is used.",
   "Dense numerical Jacobian.",
   "Dense symbolical Jacobian. Needs omc compiler flag --generateDynamicJacobian=symbolic.",
+  "Bidirectional (star bicolored) symbolical Jacobian. Needs omc compiler flag --generateDynamicJacobian=bidirectional.",
  };
 
 const char *IDA_LS_METHOD_NAME[IDA_LS_MAX] = {

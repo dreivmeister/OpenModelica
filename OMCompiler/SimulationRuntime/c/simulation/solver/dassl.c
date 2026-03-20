@@ -115,6 +115,10 @@ int jacA_symColored(double *t, double *y, double *yprime,
                    double *deltaD, double *pd, double *cj, double *h,
                    double *wt, double *rpar, int* ipar);
 
+int jacA_symBiColored(double *t, double *y, double *yprime,
+                      double *deltaD, double *pd, double *cj, double *h,
+                      double *wt, double *rpar, int* ipar);
+
 void setJacElementDasslSparse(int l, int k, int nth, double val,
                                      void* matrixA, int rows);
 
@@ -384,6 +388,18 @@ int dassl_initial(DATA* data, threadData_t *threadData,
       dasslData->allocatedParMem = 1;   /* true */
 #endif
       break;
+    case BICOLOREDSYMJAC: {
+      JACOBIAN* jac_A = &(data->simulationInfo->analyticJacobians[data->callback->INDEX_JAC_A]);
+      data->simulationInfo->jacobianEvals = jac_A->sparsePattern->maxColors
+          + (jac_A->adjointJacobian ? jac_A->adjointJacobian->sparsePattern->maxColors : 0);
+      if (!jac_A->isBidirectional) {
+        warningStreamPrint(OMC_LOG_SOLVER, 0,
+            "bicoloredSymbolical selected but Jacobian was not compiled bidirectionally; "
+            "falling back to standard colored symbolic evaluation.");
+      }
+      dasslData->jacobianFunction = jacA_symBiColored;
+      break;
+    }
     case SYMJAC:
       dasslData->jacobianFunction = jacA_sym;
 #ifdef USE_PARJAC
@@ -995,6 +1011,29 @@ int jacA_symColored(double *t, double *y, double *yprime, double *delta,
 
   genericColoredSymbolicJacobianEvaluation(rows, columns, spp, matrixA, t_jac,
                                            data, threadData, &setJacElementDasslSparse);
+
+  return 0;
+}
+
+/* \fn jacA_symBiColored(double *t, double *y, double *yprime, double *deltaD, double *pd, double *cj, double *h, double *wt,
+   double *rpar, int* ipar)
+ *
+ *
+ * This function calculates the Jacobian matrix using bidirectional (star bicolored)
+ * evaluation: a forward/column phase followed by an adjoint/row phase, recovering
+ * all nonzeros with fewer evaluations than either direction alone.
+ */
+int jacA_symBiColored(double *t, double *y, double *yprime, double *delta,
+                      double *matrixA, double *cj, double *h, double *wt,
+                      double *rpar, int *ipar)
+{
+  DATA* data = (DATA*)(void*)((double**)rpar)[0];
+  threadData_t *threadData = (threadData_t*)(void*)((double**)rpar)[2];
+  const int index = data->callback->INDEX_JAC_A;
+  JACOBIAN* jac = &(data->simulationInfo->analyticJacobians[index]);
+
+  /* evalJacobian dispatches to evalJacobianBidirectional when jac->isBidirectional is set */
+  evalJacobian(data, threadData, jac, NULL, matrixA, 1 /* isDense */);
 
   return 0;
 }

@@ -460,6 +460,7 @@ typedef enum JACOBIAN_METHOD
   COLOREDSYMJAC,      /* Colored symbolic Jacobian */
   NUMJAC,             /* Non-colored numeric Jacobian */
   SYMJAC,             /* Non-colored symbolic Jacobian */
+  BICOLOREDSYMJAC,    /* Bidirectional (star bicolored) symbolic Jacobian */
 
   JAC_MAX
 } JACOBIAN_METHOD;
