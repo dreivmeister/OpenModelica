@@ -5615,7 +5615,7 @@ template functionAnalyticJacobians(list<JacobianMatrix> JacobianMatrices, String
           listLength(coloredRows),
           modelNamePrefix,
           fileNamePrefix,
-          isAdjoint)
+          isAdjoint,
           isBidirectional,
           adjointJacobianIndex,
           adjointMatrixName)
@@ -5630,7 +5630,7 @@ template functionAnalyticJacobians(list<JacobianMatrix> JacobianMatrices, String
           maxColorCols,
           modelNamePrefix,
           fileNamePrefix,
-          isAdjoint)
+          isAdjoint,
           isBidirectional,
           adjointJacobianIndex,
           adjointMatrixName)
