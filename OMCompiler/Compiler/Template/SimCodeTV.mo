@@ -1064,6 +1064,7 @@ end SparsityRow;
       FmiDerivatives fmiDerivatives;
       Option<JacobianMatrix> continuousPartialDerivatives;
       Option<JacobianMatrix> initialPartialDerivatives;
+      Option<JacobianMatrix> adjointPartialDerivatives;
       FmiDiscreteStates fmiDiscreteStates;
       FmiInitialUnknowns fmiInitialUnknowns;
     end FMIMODELSTRUCTURE;
@@ -1543,6 +1544,11 @@ package SimCodeUtil
     input SimCode.SimCode inSimCode;
     output Boolean b;
   end providesDirectionalDerivative;
+
+  function providesAdjointDerivative
+    input SimCode.SimCode inSimCode;
+    output Boolean b;
+  end providesAdjointDerivative;
 
   function isVarIndexListConsecutive
     input HashTableCrIListArray.HashTable iVarToArrayIndexMapping;

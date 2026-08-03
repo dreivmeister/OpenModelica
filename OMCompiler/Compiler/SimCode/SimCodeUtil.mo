@@ -12180,6 +12180,20 @@ algorithm
   end match;
 end providesDirectionalDerivative;
 
+public function providesAdjointDerivative
+  "True if the SimCode carries a symbolic adjoint (vector-Jacobian product)
+   FMIDERADJ jacobian, i.e. fmi3GetAdjointDerivative is actually supported.
+   Only the new backend ever populates adjointPartialDerivatives."
+  input SimCode.SimCode inSimCode;
+  output Boolean b;
+algorithm
+  b := match inSimCode
+    case SimCode.SIMCODE(modelStructure=SOME(SimCode.FMIMODELSTRUCTURE(adjointPartialDerivatives=SOME(_))))
+    then true;
+    else false;
+  end match;
+end providesAdjointDerivative;
+
 protected function getVarIndexInfosByMapping "author: marcusw
   Return the variable indices stored for the given variable in the mapping-table. This function is used by susan."
   input HashTableCrIListArray.HashTable iVarToArrayIndexMapping;
@@ -13896,6 +13910,7 @@ algorithm
           SimCode.FMIDERIVATIVES(derivatives),
           contPartSimDer,
           initPartSimDer,
+          NONE() /* adjoint derivatives: the old backend never produces an FMIDERADJ jacobian */,
           SimCode.FMIDISCRETESTATES(discreteStates),
           SimCode.FMIINITIALUNKNOWNS(allInitialUnknowns, sortedUnknownCrefs, sortedknownCrefs)));
 else
@@ -13948,8 +13963,10 @@ else
           SimCode.FMIDERIVATIVES(derivatives),
           contPartSimDer,
           initPartSimDer,
+          NONE(),
           SimCode.FMIDISCRETESTATES(discreteStates),
-          SimCode.FMIINITIALUNKNOWNS(allInitialUnknowns, {}, {})));
+          SimCode.FMIINITIALUNKNOWNS(allInitialUnknowns, {}, {})
+          ));
   else
     Error.addInternalError("SimCodeUtil.createFMIModelStructure failed", sourceInfo());
     fail();
@@ -15685,6 +15702,7 @@ algorithm
     SimCode.FMIDERIVATIVES(derivs),
     NONE(),
     NONE(),
+    NONE() /* adjoint derivatives are filled in later by generateModelCodeNewBackend, if the NB pipeline produced one */,
     SimCode.FMIDISCRETESTATES({}),
     SimCode.FMIINITIALUNKNOWNS(initialUnknowns, {}, {})));
 end createMinimalFMIModelStructure;
