@@ -79,6 +79,7 @@ protected
   import BackendDAE = NBackendDAE;
   import NBPartitioning.ClockedInfo;
   import BEquation = NBEquation;
+  import Jacobian = NBJacobian;
   import NBEquation.{Equation, EquationPointer, EquationPointers, EqData};
   import NBEvents.EventInfo;
   import NBVariable.{VariablePointers, VarData};
@@ -290,6 +291,7 @@ public
       input String fileNamePrefix;
       input Option<OldSimCode.SimulationSettings> simSettingsOpt;
       input Absyn.Program program "the instantiated program; passed in by the caller (e.g. from SymbolTable.getAbsyn) so NSimCode does not depend on the old backend's SymbolTable";
+      input Boolean generateFMIAdjoint = false "Generate FMIDERADJ for FMI 3.0 FMUs only.";
       output SimCode simCode;
       output AvlTreePathFunction.Tree oldFunctionTree;
     protected
@@ -328,6 +330,8 @@ public
           list<ComponentRef> discreteVars;
           ExtObjInfo extObjInfo;
           list<SimJacobian> jacobians;
+          Option<BackendDAE.BackendDAE> fmiAdjointJacobian;
+          Option<SimJacobian> simFMIAdjointJacobian = NONE();
           UnorderedMap<ComponentRef, SimVar> simcode_map;
           UnorderedMap<ComponentRef, SimStrongComponent.Block> equation_map;
           Option<DaeModeData> daeModeData;
@@ -445,6 +449,17 @@ public
             //jacobians := jacA :: jacB :: jacC :: jacD :: jacF :: jacH :: jacAdjoint :: jacobians;
             jacobians := listReverse(jacR0 :: jacMrf :: jacLfg :: jacAdjoint :: jacH :: jacF :: jacD :: jacC :: jacB :: jacA :: jacobians);
 
+            if generateFMIAdjoint then
+              fmiAdjointJacobian := Jacobian.fmiAdjoint(bdae);
+              if isSome(fmiAdjointJacobian) then
+                (simFMIAdjointJacobian, simCodeIndices) := SimJacobian.create(
+                  Util.getOption(fmiAdjointJacobian), simCodeIndices, simcode_map);
+                if isSome(simFMIAdjointJacobian) then
+                  jacobians := Util.getOption(simFMIAdjointJacobian) :: jacobians;
+                end if;
+              end if;
+            end if;
+
             for jac in jacobians loop
               if isSome(jac.jac_map) then
                 vars := SimVars.addSeedAndJacobianVars(vars, UnorderedMap.toList(Util.getOption(jac.jac_map)));
@@ -453,6 +468,9 @@ public
 
             // jacobian blocks only from simulation jacobians
             jac_blocks := SimJacobian.getJacobiansBlocks({jacA, jacB, jacC, jacD, jacF, jacH, jacAdjoint, jacLfg, jacMrf, jacR0});
+            if isSome(simFMIAdjointJacobian) then
+              jac_blocks := listAppend(SimJacobian.getJacobianBlocks(Util.getOption(simFMIAdjointJacobian)), jac_blocks);
+            end if;
             // (jac_blocks, simCodeIndices) := SimStrongComponent.Block.fixIndices(jac_blocks, {}, simCodeIndices);
 
             // TODO: these should be collected prior, and are the linear systems of Jacobian (inner linear to compute pDers)
