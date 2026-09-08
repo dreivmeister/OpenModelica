@@ -1537,7 +1537,13 @@ protected
     unknown_vars  := listAppend(res_vars, tmp_vars);
     all_vars      := unknown_vars;  // add other vars later on
 
-    seed_vars     := Pointer.access(seed_vars_ptr);
+    // NOTE: do NOT re-read seed_vars_ptr here. The pointer accumulates by
+    // prepending, so its raw content is in reverse creation order. seed_vars was
+    // already normalized with listReverse() above and must keep that order:
+    // the i-th adjoint seed variable has to denote the very same row of J as the
+    // i-th result variable of the forward Jacobian. Overwriting it with the
+    // unreversed list permutes the rows of the adjoint (and bidirectional)
+    // Jacobian, see evalJacobianRow()/initBidirectionalRecovery().
     aux_vars      := seed_vars;     // add other auxiliaries later on. TODO: Need to add the SSA vars and the lambda vars from algebraic loops as auxiliaries?
     alias_vars    := {};
     depend_vars   := {};
