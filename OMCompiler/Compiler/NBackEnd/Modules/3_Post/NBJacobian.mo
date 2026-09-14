@@ -127,8 +127,9 @@ public
       local
         String name             "Context name for jacobian";
         VariablePointers knowns "Variable array of knowns";
+        VariablePointers states "Variable array of states, defines the column order of dynamic jacobians";
 
-      case BackendDAE.MAIN(varData = BVariable.VAR_DATA_SIM(knowns = knowns))
+      case BackendDAE.MAIN(varData = BVariable.VAR_DATA_SIM(knowns = knowns, states = states))
         algorithm
           if Flags.isSet(Flags.JAC_DUMP) then
             print(StringUtil.headline_1("[symjacdump] Creating symbolic Jacobians:") + "\n");
@@ -137,11 +138,11 @@ public
           name := match kind
             case NBPartition.Kind.ODE algorithm
               name := "ODE_JAC";
-              bdae.ode := applyToPartitions(bdae.ode, bdae.funcMap, knowns, name, func);
+              bdae.ode := applyToPartitions(bdae.ode, bdae.funcMap, knowns, states, name, func);
             then name;
             case NBPartition.Kind.DAE algorithm
               name := "DAE_JAC";
-              bdae.dae := SOME(applyToPartitions(Util.getOption(bdae.dae), bdae.funcMap, knowns, name, func));
+              bdae.dae := SOME(applyToPartitions(Util.getOption(bdae.dae), bdae.funcMap, knowns, states, name, func));
             then name;
             else algorithm
               Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for: " + Partition.Partition.kindToString(kind)});
@@ -149,12 +150,12 @@ public
           end match;
 
           // DAE mode: SimCode reads only the DAE partition jacobian
-          bdae.ode_event := applyToPartitions(bdae.ode_event, bdae.funcMap, knowns, name, func, kind <> NBPartition.Kind.DAE);
-          bdae.algebraic := applyToPartitions(bdae.algebraic, bdae.funcMap, knowns, name, func);
-          bdae.alg_event := applyToPartitions(bdae.alg_event, bdae.funcMap, knowns, name, func);
-          bdae.init := applyToPartitions(bdae.init, bdae.funcMap, knowns, name, func);
+          bdae.ode_event := applyToPartitions(bdae.ode_event, bdae.funcMap, knowns, states, name, func, kind <> NBPartition.Kind.DAE);
+          bdae.algebraic := applyToPartitions(bdae.algebraic, bdae.funcMap, knowns, states, name, func);
+          bdae.alg_event := applyToPartitions(bdae.alg_event, bdae.funcMap, knowns, states, name, func);
+          bdae.init := applyToPartitions(bdae.init, bdae.funcMap, knowns, states, name, func);
           if isSome(bdae.init_0) then
-            bdae.init_0 := SOME(applyToPartitions(Util.getOption(bdae.init_0), bdae.funcMap, knowns, name, func));
+            bdae.init_0 := SOME(applyToPartitions(Util.getOption(bdae.init_0), bdae.funcMap, knowns, states, name, func));
           end if;
       then bdae;
 
@@ -170,11 +171,12 @@ public
     input output list<Partition.Partition> partitions;
     input output UnorderedMap<Path, Function> funcMap;
     input VariablePointers knowns;
+    input VariablePointers states "defines the column order of dynamic jacobians";
     input String name;
     input Module.jacobianInterface func;
     input Boolean simJacobian = true "also create the partition jacobian";
   algorithm
-    partitions := list(partJacobian(part, funcMap, knowns, name, func, simJacobian) for part in partitions);
+    partitions := list(partJacobian(part, funcMap, knowns, states, name, func, simJacobian) for part in partitions);
   end applyToPartitions;
 
   function nonlinear
@@ -438,13 +440,16 @@ protected
     input output Partition.Partition part;
     input UnorderedMap<Path, Function> funcMap;
     input VariablePointers knowns;
+    input VariablePointers states                         "Global state variables, defines the column order of dynamic jacobians";
     input String name                                     "Context name for jacobian";
     input Module.jacobianInterface func;
     input Boolean simJacobian = true;
   protected
     JacobianType jacType;
     VariablePointers unknowns;
-    list<PointerCyclic<Variable>> derivative_vars, state_vars;
+    list<PointerCyclic<Variable>> derivative_vars, state_vars, other_vars;
+    UnorderedMap<ComponentRef, PointerCyclic<Variable>> state_der_map;
+    ComponentRef state_name;
     VariablePointers seedCandidates, partialCandidates;
     Option<Jacobian> jacobian, LFG_jacobian = NONE(), MRF_jacobian = NONE(), R0_jacobian = NONE()  "Resulting jacobians";
     Option<Jacobian> adjointJac;
@@ -473,6 +478,39 @@ protected
 
       derivative_vars := list(var for var guard(BVariable.isStateDerivative(var)) in VariablePointers.toList(unknowns));
       state_vars := list(Util.getOption(BVariable.getVarState(var)) for var in derivative_vars);
+
+      // The rows and columns of a dynamic jacobian are addressed by the integrator
+      // using the index of the state in the simulation state vector, but the
+      // partition unknowns are in matching/sorting order. Re-sort the state (column)
+      // and state derivative (row) candidates by the global state ordering, which is
+      // what SimCode emits as the state vector. Without this the generated jacobian
+      // is P*J*P^T instead of J. If the partition states cannot be matched one to one
+      // against the global states (e.g. scalarized partitions), keep the old order.
+      state_der_map := UnorderedMap.new<BVariable.VariablePointer>(ComponentRef.hash, ComponentRef.isEqual);
+      for var in derivative_vars loop
+        UnorderedMap.add(BVariable.getVarName(Util.getOption(BVariable.getVarState(var))), var, state_der_map);
+      end for;
+      if UnorderedMap.size(state_der_map) == listLength(derivative_vars) then
+        state_vars := {};
+        other_vars := {};
+        for var in VariablePointers.toList(states) loop
+          state_name := BVariable.getVarName(var);
+          if UnorderedMap.contains(state_name, state_der_map) then
+            state_vars := var :: state_vars;
+            other_vars := UnorderedMap.getSafe(state_name, state_der_map, sourceInfo()) :: other_vars;
+          end if;
+        end for;
+        if listLength(state_vars) == listLength(derivative_vars) then
+          state_vars      := listReverse(state_vars);
+          derivative_vars := listReverse(other_vars);
+          if jacType == JacobianType.ODE then
+            // keep the temporary (non state derivative) unknowns in their original order
+            other_vars := list(var for var guard(not BVariable.isStateDerivative(var)) in VariablePointers.toList(partialCandidates));
+            partialCandidates := VariablePointers.fromList(listAppend(derivative_vars, other_vars), partialCandidates.scalarized);
+          end if;
+        end if;
+      end if;
+
       seedCandidates := VariablePointers.fromList(state_vars, partialCandidates.scalarized);
 
       jacobian := func(name, jacType, seedCandidates, partialCandidates, part.equations, part.strongComponents, part.adjacencyMatrix, funcMap, Partition.kindIsInitial(kind));

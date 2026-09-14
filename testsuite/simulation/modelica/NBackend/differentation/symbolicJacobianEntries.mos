@@ -1,7 +1,7 @@
 // name: symbolicJacobianEntries
 // keywords: NewBackend, differentiation, jacobian, adjoint, bidirectional, coloring, permutation
 // status: correct
-// teardown_command: rm -rf jacobianEntryPermutation* jac_*.txt
+// teardown_command: rm -rf jacobianEntryPermutation*
 //
 // Regression test for the row/column *placement* of the colored symbolic Jacobian
 // evaluation paths.
@@ -21,34 +21,27 @@
 // uses neither the sparsity pattern nor any coloring and therefore is an independent
 // reference for the three colored variants.
 //
-// The model has a hollow, non-symmetric sparsity pattern with pairwise distinct
-// entries
+// The model has a non-symmetric sparsity pattern
 //
 //        d der(x)/dx  =  [  0   2   0   3 ]
 //                        [  5   0   7   0 ]
 //                        [  0  11   0  13 ]
 //                        [ 17   0  19   0 ]
 //
-// so that any row permutation, column permutation or transposition moves at least
-// one distinct value to a different location and is immediately visible.  Four
-// scalar (non-array) states are used on purpose: the adjoint seed variables are
-// held in a plain list, so only a scalar model can expose an ordering error in
-// that list.  The pattern still admits two column colors and two row colors, i.e.
-// the coloring-based compression is genuinely exercised.
+// with pairwise distinct entries, so that any row permutation, column permutation
+// or transposition relocates a distinct value and is immediately visible.  Scalar
+// (non-array) states are used on purpose: the adjoint seed variables are held in a
+// plain list, so only a scalar model can expose an ordering error in that list.
 //
-// Before the fix in NBJacobian.jacobianSymbolicAdjoint (where the adjoint seed
-// variable list was overwritten with the unreversed accumulator content) this test
-// failed: coloredSymbolicalAdjoint returned P_r * J with P_r reversing the row
-// order, and bicoloredSymbolical returned zero for every entry that is only
-// recoverable from the row phase.
+// The "Jacobian verification: analytical vs. numerical" block additionally compares
+// the emitted matrix against DASSL's own finite difference Jacobian, which is by
+// construction indexed by the state vector.  It therefore also pins down that the
+// jacobian rows and columns are ordered like the state vector and not like the
+// partition unknowns; the remaining difference is pure finite difference noise.
 //
-// Notes on the logged values:
-//  * DASSL prints pd = J - cj*I, so the diagonal carries the -cj term.  The
-//    -initialStepSize flag pins the step size, hence cj (= 1e5) and the single
-//    reported Jacobian are reproducible.
-//  * The variable names annotated for rows/columns stem from the global real
-//    variable array and do not necessarily coincide with the Jacobian's own
-//    variable order; only the numerical placement is asserted here.
+// Note: DASSL prints pd = J - cj*I, so the diagonal carries the -cj term.
+// -initialStepSize pins the step size, hence cj (= 1e5) and the single reported
+// Jacobian are reproducible.
 
 loadString("
 model jacobianEntryPermutation
@@ -69,22 +62,16 @@ setCommandLineOptions("--newBackend --generateDynamicJacobian=bidirectional"); g
 buildModel(jacobianEntryPermutation, stopTime = 1e-5, numberOfIntervals = 1, tolerance = 1e-6); getErrorString();
 
 // uncolored forward evaluation - independent reference
-system("./jacobianEntryPermutation -s=dassl -jacobian=symbolical -initialStepSize=1e-5 -lv=LOG_JAC 2>&1 | grep -o \"J(row=.*\" > jac_ref.txt");
-readFile("jac_ref.txt");
+simulate(jacobianEntryPermutation, simflags="-s=dassl -jacobian=symbolical -initialStepSize=1e-5 -lv=LOG_JAC", resimulateExecutable="jacobianEntryPermutation");
 
 // colored forward (column) evaluation
-system("./jacobianEntryPermutation -s=dassl -jacobian=coloredSymbolical -initialStepSize=1e-5 -lv=LOG_JAC 2>&1 | grep -o \"J(row=.*\" > jac_fwd.txt");
-system("diff jac_ref.txt jac_fwd.txt");
+simulate(jacobianEntryPermutation, simflags="-s=dassl -jacobian=coloredSymbolical -initialStepSize=1e-5 -lv=LOG_JAC", resimulateExecutable="jacobianEntryPermutation");
 
 // colored adjoint (row) evaluation
-system("./jacobianEntryPermutation -s=dassl -jacobian=coloredSymbolicalAdjoint -initialStepSize=1e-5 -lv=LOG_JAC 2>&1 | grep -o \"J(row=.*\" > jac_adj.txt");
-system("diff jac_ref.txt jac_adj.txt");
-readFile("jac_adj.txt");
+simulate(jacobianEntryPermutation, simflags="-s=dassl -jacobian=coloredSymbolicalAdjoint -initialStepSize=1e-5 -lv=LOG_JAC", resimulateExecutable="jacobianEntryPermutation");
 
 // bidirectional (star bicoloring) evaluation
-system("./jacobianEntryPermutation -s=dassl -jacobian=bicoloredSymbolical -initialStepSize=1e-5 -lv=LOG_JAC 2>&1 | grep -o \"J(row=.*\" > jac_bi.txt");
-system("diff jac_ref.txt jac_bi.txt");
-readFile("jac_bi.txt");
+simulate(jacobianEntryPermutation, simflags="-s=dassl -jacobian=bicoloredSymbolical -initialStepSize=1e-5 -lv=LOG_JAC", resimulateExecutable="jacobianEntryPermutation");
 
 // Result:
 // true
@@ -93,62 +80,116 @@ readFile("jac_bi.txt");
 // ""
 // {"jacobianEntryPermutation", "jacobianEntryPermutation_init.xml"}
 // ""
-// 0
-// "J(row=0:'x1', col=0:'x1') = -99999.99999999999 [flat=0]
-// J(row=1:'x2', col=0:'x1') = 19 [flat=1]
-// J(row=2:'x3', col=0:'x1') = 0 [flat=2]
-// J(row=3:'x4', col=0:'x1') = 7 [flat=3]
-// J(row=0:'x1', col=1:'x2') = 13 [flat=4]
-// J(row=1:'x2', col=1:'x2') = -99999.99999999999 [flat=5]
-// J(row=2:'x3', col=1:'x2') = 3 [flat=6]
-// J(row=3:'x4', col=1:'x2') = 0 [flat=7]
-// J(row=0:'x1', col=2:'x3') = 0 [flat=8]
-// J(row=1:'x2', col=2:'x3') = 17 [flat=9]
-// J(row=2:'x3', col=2:'x3') = -99999.99999999999 [flat=10]
-// J(row=3:'x4', col=2:'x3') = 5 [flat=11]
-// J(row=0:'x1', col=3:'x4') = 11 [flat=12]
-// J(row=1:'x2', col=3:'x4') = 0 [flat=13]
-// J(row=2:'x3', col=3:'x4') = 2 [flat=14]
-// J(row=3:'x4', col=3:'x4') = -99999.99999999999 [flat=15]
+// record SimulationResult
+//     resultFile = "jacobianEntryPermutation_res.mat",
+//     simulationOptions = "startTime = 0.0, stopTime = 1.0, numberOfIntervals = 500, tolerance = 1e-6, method = 'dassl', fileNamePrefix = 'jacobianEntryPermutation', options = '', outputFormat = 'mat', variableFilter = '.*', cflags = '', simflags = '-s=dassl -jacobian=symbolical -initialStepSize=1e-5 -lv=LOG_JAC'",
+//     messages = "LOG_JAC           | info    | Using Jacobian method: Symbolical Jacobian.
+// LOG_SUCCESS       | info    | The initialization finished successfully without homotopy method.
+// LOG_JAC           | info    | DASSL-Solver: analytical Jacobian pd (column-major) at time=1e-05
+// |                 | |       | | J(row=0:'x1', col=0:'x1') = -99999.99999999999 [flat=0]
+// |                 | |       | | J(row=1:'x2', col=0:'x1') = 5 [flat=1]
+// |                 | |       | | J(row=2:'x3', col=0:'x1') = 0 [flat=2]
+// |                 | |       | | J(row=3:'x4', col=0:'x1') = 17 [flat=3]
+// |                 | |       | | J(row=0:'x1', col=1:'x2') = 2 [flat=4]
+// |                 | |       | | J(row=1:'x2', col=1:'x2') = -99999.99999999999 [flat=5]
+// |                 | |       | | J(row=2:'x3', col=1:'x2') = 11 [flat=6]
+// |                 | |       | | J(row=3:'x4', col=1:'x2') = 0 [flat=7]
+// |                 | |       | | J(row=0:'x1', col=2:'x3') = 0 [flat=8]
+// |                 | |       | | J(row=1:'x2', col=2:'x3') = 7 [flat=9]
+// |                 | |       | | J(row=2:'x3', col=2:'x3') = -99999.99999999999 [flat=10]
+// |                 | |       | | J(row=3:'x4', col=2:'x3') = 19 [flat=11]
+// |                 | |       | | J(row=0:'x1', col=3:'x4') = 3 [flat=12]
+// |                 | |       | | J(row=1:'x2', col=3:'x4') = 0 [flat=13]
+// |                 | |       | | J(row=2:'x3', col=3:'x4') = 13 [flat=14]
+// |                 | |       | | J(row=3:'x4', col=3:'x4') = -99999.99999999999 [flat=15]
+// LOG_JAC           | info    | Jacobian verification: analytical vs. numerical
+// |                 | |       | | Max absolute difference: 4.17178e-07 at (row=2:'x3', col=1:'x2')
+// |                 | |       | | Max relative difference: 5.95969e-08 at (row=0:'x1', col=1:'x2')
+// LOG_SUCCESS       | info    | The simulation finished successfully.
 // "
-// 0
-// 0
-// 0
-// 0
-// "J(row=0:'x1', col=0:'x1') = -99999.99999999999 [flat=0]
-// J(row=1:'x2', col=0:'x1') = 19 [flat=1]
-// J(row=2:'x3', col=0:'x1') = 0 [flat=2]
-// J(row=3:'x4', col=0:'x1') = 7 [flat=3]
-// J(row=0:'x1', col=1:'x2') = 13 [flat=4]
-// J(row=1:'x2', col=1:'x2') = -99999.99999999999 [flat=5]
-// J(row=2:'x3', col=1:'x2') = 3 [flat=6]
-// J(row=3:'x4', col=1:'x2') = 0 [flat=7]
-// J(row=0:'x1', col=2:'x3') = 0 [flat=8]
-// J(row=1:'x2', col=2:'x3') = 17 [flat=9]
-// J(row=2:'x3', col=2:'x3') = -99999.99999999999 [flat=10]
-// J(row=3:'x4', col=2:'x3') = 5 [flat=11]
-// J(row=0:'x1', col=3:'x4') = 11 [flat=12]
-// J(row=1:'x2', col=3:'x4') = 0 [flat=13]
-// J(row=2:'x3', col=3:'x4') = 2 [flat=14]
-// J(row=3:'x4', col=3:'x4') = -99999.99999999999 [flat=15]
+// end SimulationResult;
+// record SimulationResult
+//     resultFile = "jacobianEntryPermutation_res.mat",
+//     simulationOptions = "startTime = 0.0, stopTime = 1.0, numberOfIntervals = 500, tolerance = 1e-6, method = 'dassl', fileNamePrefix = 'jacobianEntryPermutation', options = '', outputFormat = 'mat', variableFilter = '.*', cflags = '', simflags = '-s=dassl -jacobian=coloredSymbolical -initialStepSize=1e-5 -lv=LOG_JAC'",
+//     messages = "LOG_JAC           | info    | Using Jacobian method: Colored symbolical Jacobian.
+// LOG_SUCCESS       | info    | The initialization finished successfully without homotopy method.
+// LOG_JAC           | info    | DASSL-Solver: analytical Jacobian pd (column-major) at time=1e-05
+// |                 | |       | | J(row=0:'x1', col=0:'x1') = -99999.99999999999 [flat=0]
+// |                 | |       | | J(row=1:'x2', col=0:'x1') = 5 [flat=1]
+// |                 | |       | | J(row=2:'x3', col=0:'x1') = 0 [flat=2]
+// |                 | |       | | J(row=3:'x4', col=0:'x1') = 17 [flat=3]
+// |                 | |       | | J(row=0:'x1', col=1:'x2') = 2 [flat=4]
+// |                 | |       | | J(row=1:'x2', col=1:'x2') = -99999.99999999999 [flat=5]
+// |                 | |       | | J(row=2:'x3', col=1:'x2') = 11 [flat=6]
+// |                 | |       | | J(row=3:'x4', col=1:'x2') = 0 [flat=7]
+// |                 | |       | | J(row=0:'x1', col=2:'x3') = 0 [flat=8]
+// |                 | |       | | J(row=1:'x2', col=2:'x3') = 7 [flat=9]
+// |                 | |       | | J(row=2:'x3', col=2:'x3') = -99999.99999999999 [flat=10]
+// |                 | |       | | J(row=3:'x4', col=2:'x3') = 19 [flat=11]
+// |                 | |       | | J(row=0:'x1', col=3:'x4') = 3 [flat=12]
+// |                 | |       | | J(row=1:'x2', col=3:'x4') = 0 [flat=13]
+// |                 | |       | | J(row=2:'x3', col=3:'x4') = 13 [flat=14]
+// |                 | |       | | J(row=3:'x4', col=3:'x4') = -99999.99999999999 [flat=15]
+// LOG_JAC           | info    | Jacobian verification: analytical vs. numerical
+// |                 | |       | | Max absolute difference: 4.17178e-07 at (row=2:'x3', col=1:'x2')
+// |                 | |       | | Max relative difference: 5.95969e-08 at (row=0:'x1', col=1:'x2')
+// LOG_SUCCESS       | info    | The simulation finished successfully.
 // "
-// 0
-// 0
-// "J(row=0:'x1', col=0:'x1') = -99999.99999999999 [flat=0]
-// J(row=1:'x2', col=0:'x1') = 19 [flat=1]
-// J(row=2:'x3', col=0:'x1') = 0 [flat=2]
-// J(row=3:'x4', col=0:'x1') = 7 [flat=3]
-// J(row=0:'x1', col=1:'x2') = 13 [flat=4]
-// J(row=1:'x2', col=1:'x2') = -99999.99999999999 [flat=5]
-// J(row=2:'x3', col=1:'x2') = 3 [flat=6]
-// J(row=3:'x4', col=1:'x2') = 0 [flat=7]
-// J(row=0:'x1', col=2:'x3') = 0 [flat=8]
-// J(row=1:'x2', col=2:'x3') = 17 [flat=9]
-// J(row=2:'x3', col=2:'x3') = -99999.99999999999 [flat=10]
-// J(row=3:'x4', col=2:'x3') = 5 [flat=11]
-// J(row=0:'x1', col=3:'x4') = 11 [flat=12]
-// J(row=1:'x2', col=3:'x4') = 0 [flat=13]
-// J(row=2:'x3', col=3:'x4') = 2 [flat=14]
-// J(row=3:'x4', col=3:'x4') = -99999.99999999999 [flat=15]
+// end SimulationResult;
+// record SimulationResult
+//     resultFile = "jacobianEntryPermutation_res.mat",
+//     simulationOptions = "startTime = 0.0, stopTime = 1.0, numberOfIntervals = 500, tolerance = 1e-6, method = 'dassl', fileNamePrefix = 'jacobianEntryPermutation', options = '', outputFormat = 'mat', variableFilter = '.*', cflags = '', simflags = '-s=dassl -jacobian=coloredSymbolicalAdjoint -initialStepSize=1e-5 -lv=LOG_JAC'",
+//     messages = "LOG_JAC           | info    | Using Jacobian method: Colored symbolical adjoint Jacobian.
+// LOG_SUCCESS       | info    | The initialization finished successfully without homotopy method.
+// LOG_JAC           | info    | DASSL-Solver: analytical Jacobian pd (column-major) at time=1e-05
+// |                 | |       | | J(row=0:'x1', col=0:'x1') = -99999.99999999999 [flat=0]
+// |                 | |       | | J(row=1:'x2', col=0:'x1') = 5 [flat=1]
+// |                 | |       | | J(row=2:'x3', col=0:'x1') = 0 [flat=2]
+// |                 | |       | | J(row=3:'x4', col=0:'x1') = 17 [flat=3]
+// |                 | |       | | J(row=0:'x1', col=1:'x2') = 2 [flat=4]
+// |                 | |       | | J(row=1:'x2', col=1:'x2') = -99999.99999999999 [flat=5]
+// |                 | |       | | J(row=2:'x3', col=1:'x2') = 11 [flat=6]
+// |                 | |       | | J(row=3:'x4', col=1:'x2') = 0 [flat=7]
+// |                 | |       | | J(row=0:'x1', col=2:'x3') = 0 [flat=8]
+// |                 | |       | | J(row=1:'x2', col=2:'x3') = 7 [flat=9]
+// |                 | |       | | J(row=2:'x3', col=2:'x3') = -99999.99999999999 [flat=10]
+// |                 | |       | | J(row=3:'x4', col=2:'x3') = 19 [flat=11]
+// |                 | |       | | J(row=0:'x1', col=3:'x4') = 3 [flat=12]
+// |                 | |       | | J(row=1:'x2', col=3:'x4') = 0 [flat=13]
+// |                 | |       | | J(row=2:'x3', col=3:'x4') = 13 [flat=14]
+// |                 | |       | | J(row=3:'x4', col=3:'x4') = -99999.99999999999 [flat=15]
+// LOG_JAC           | info    | Jacobian verification: analytical vs. numerical
+// |                 | |       | | Max absolute difference: 4.17178e-07 at (row=2:'x3', col=1:'x2')
+// |                 | |       | | Max relative difference: 5.95969e-08 at (row=0:'x1', col=1:'x2')
+// LOG_SUCCESS       | info    | The simulation finished successfully.
 // "
+// end SimulationResult;
+// record SimulationResult
+//     resultFile = "jacobianEntryPermutation_res.mat",
+//     simulationOptions = "startTime = 0.0, stopTime = 1.0, numberOfIntervals = 500, tolerance = 1e-6, method = 'dassl', fileNamePrefix = 'jacobianEntryPermutation', options = '', outputFormat = 'mat', variableFilter = '.*', cflags = '', simflags = '-s=dassl -jacobian=bicoloredSymbolical -initialStepSize=1e-5 -lv=LOG_JAC'",
+//     messages = "LOG_JAC           | info    | Using Jacobian method: Bicolored symbolical bidirectional Jacobian.
+// LOG_SUCCESS       | info    | The initialization finished successfully without homotopy method.
+// LOG_JAC           | info    | DASSL-Solver: analytical Jacobian pd (column-major) at time=1e-05
+// |                 | |       | | J(row=0:'x1', col=0:'x1') = -99999.99999999999 [flat=0]
+// |                 | |       | | J(row=1:'x2', col=0:'x1') = 5 [flat=1]
+// |                 | |       | | J(row=2:'x3', col=0:'x1') = 0 [flat=2]
+// |                 | |       | | J(row=3:'x4', col=0:'x1') = 17 [flat=3]
+// |                 | |       | | J(row=0:'x1', col=1:'x2') = 2 [flat=4]
+// |                 | |       | | J(row=1:'x2', col=1:'x2') = -99999.99999999999 [flat=5]
+// |                 | |       | | J(row=2:'x3', col=1:'x2') = 11 [flat=6]
+// |                 | |       | | J(row=3:'x4', col=1:'x2') = 0 [flat=7]
+// |                 | |       | | J(row=0:'x1', col=2:'x3') = 0 [flat=8]
+// |                 | |       | | J(row=1:'x2', col=2:'x3') = 7 [flat=9]
+// |                 | |       | | J(row=2:'x3', col=2:'x3') = -99999.99999999999 [flat=10]
+// |                 | |       | | J(row=3:'x4', col=2:'x3') = 19 [flat=11]
+// |                 | |       | | J(row=0:'x1', col=3:'x4') = 3 [flat=12]
+// |                 | |       | | J(row=1:'x2', col=3:'x4') = 0 [flat=13]
+// |                 | |       | | J(row=2:'x3', col=3:'x4') = 13 [flat=14]
+// |                 | |       | | J(row=3:'x4', col=3:'x4') = -99999.99999999999 [flat=15]
+// LOG_JAC           | info    | Jacobian verification: analytical vs. numerical
+// |                 | |       | | Max absolute difference: 4.17178e-07 at (row=2:'x3', col=1:'x2')
+// |                 | |       | | Max relative difference: 5.95969e-08 at (row=0:'x1', col=1:'x2')
+// LOG_SUCCESS       | info    | The simulation finished successfully.
+// "
+// end SimulationResult;
 // endResult
