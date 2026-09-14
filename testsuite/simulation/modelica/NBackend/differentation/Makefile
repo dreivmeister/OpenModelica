@@ -7,6 +7,7 @@ adjoint_jacobian3.mos \
 adjoint_jacobian4.mos \
 adjoint_jacobian5.mos \
 symbolicJacobianEvaluation.mos \
+symbolicJacobianEntries.mos \
 allTheBuildins.mos \
 diff_subs.mos \
 arrayDiff.mos \
